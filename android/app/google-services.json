@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "108541562462",
+    "project_id": "qubex-b66d6",
+    "storage_bucket": "qubex-b66d6.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:108541562462:android:ffebb1de7aeb76763c6ecf",
+        "android_client_info": {
+          "package_name": "com.example.qubex"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBImCqHvx7ZiHg3uvHGmCDM0fAac7CDGak"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
