@@ -1,57 +1,140 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import '../theme/app_theme.dart';
+import '../services/auth_service.dart';
+import '../services/firebase_service.dart';
+import '../models/user_model.dart';
+import 'profile_setup_screen.dart';
+
+import '../widgets/loading_widget.dart';
 
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final AuthService authService = AuthService();
+    final FirebaseService firebaseService = FirebaseService();
+    final user = authService.currentUser;
+
+    if (user == null) return const Center(child: Text("Please login"));
+
     return Scaffold(
-      body: SingleChildScrollView(
-        child: Column(
-          children: [
-            Container(
-              padding: const EdgeInsets.only(top: 60, bottom: 40, left: 20, right: 20),
-              decoration: const BoxDecoration(
-                color: AppTheme.secondary,
-                borderRadius: BorderRadius.vertical(bottom: Radius.circular(32)),
-              ),
-              child: Column(
-                children: [
-                  const CircleAvatar(
-                    radius: 50,
-                    backgroundColor: AppTheme.primary,
-                    child: Text("C", style: TextStyle(fontSize: 40, color: Colors.white, fontWeight: FontWeight.bold)),
+      body: StreamBuilder<UserModel?>(
+        stream: Stream.fromFuture(firebaseService.getUser(user.uid)), // Ideally this should be a real stream
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: LoadingWidget());
+          }
+
+          final userModel = snapshot.data;
+          final name = userModel?.name ?? user.displayName ?? "User";
+          final school = userModel?.school ?? "Unknown School";
+          final photoUrl = userModel?.photoUrl.isNotEmpty == true ? userModel!.photoUrl : user.photoURL;
+
+          return Column(
+            children: [
+              // Header
+              Container(
+                padding: const EdgeInsets.fromLTRB(24, 60, 24, 30),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [AppTheme.primary, AppTheme.secondary],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                   ),
-                  const SizedBox(height: 16),
-                  const Text("Chamath Jayasuriya", style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
-                  const Text("Royal College • Physical Science", style: TextStyle(color: Colors.white54, fontSize: 14)),
-                  const SizedBox(height: 24),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  borderRadius: BorderRadius.circular(30),
+                ),
+                  child: Column(
                     children: [
-                      _StatItem("420", "IQ Score"),
-                      _StatItem("Genius", "Rank"),
-                      _StatItem("15", "Solved"),
+                      Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 40,
+                            backgroundColor: Colors.white,
+                            backgroundImage: photoUrl != null ? NetworkImage(photoUrl) : null,
+                            child: photoUrl == null 
+                              ? const Icon(Icons.person, size: 40, color: AppTheme.primary)
+                              : null,
+                          ).animate().scale(),
+                          const SizedBox(width: 20),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(name, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+                                Text(school, style: const TextStyle(color: Colors.white70, fontSize: 16)),
+                                if (userModel != null && userModel.grade.isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 4.0),
+                                    child: Text("Grade ${userModel.grade} • ${userModel.age} Years • ${userModel.gender}", 
+                                      style: const TextStyle(color: Colors.white60, fontSize: 12)),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: () {
+                              Navigator.push(context, MaterialPageRoute(builder: (context) => const ProfileSetupScreen()));
+                            },
+                            icon: const Icon(Icons.edit, color: Colors.white),
+                          )
+                        ],
+                      ),
+                      const SizedBox(height: 30),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        children: [
+                          _StatItem(label: "IQ Score", value: "${userModel?.iqScore ?? 0}"),
+                          _StatItem(label: "Rank", value: userModel?.rank ?? "Novice"),
+                          _StatItem(label: "Solved", value: "${userModel?.solvedCount ?? 0}"),
+                        ],
+                      ),
                     ],
-                  )
-                ],
+                  ),
+                ),
+
+              // Achievements / Stats Body
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.all(24),
+                  children: [
+                    const Text("Achievements", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 16),
+                    const _AchievementItem(title: "First Question", desc: "Asked your first question", icon: Icons.star, color: Colors.amber),
+                    const _AchievementItem(title: "Helper", desc: "Answered 5 questions", icon: Icons.handshake, color: Colors.blue),
+                    const _AchievementItem(title: "Scholar", desc: "Uploaded 10 notes", icon: Icons.book, color: Colors.purple),
+                    
+                    const SizedBox(height: 40),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () async {
+                          await authService.signOut();
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red.shade50,
+                          foregroundColor: Colors.red,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        ),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.logout_rounded, color: Colors.red),
+                            SizedBox(width: 8),
+                            Text("Sign Out", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text("Achievements", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-                  const SizedBox(height: 16),
-                  _AchievementItem(icon: Icons.star, color: Colors.amber, title: "Top Contributor", subtitle: "Verified 50+ Answers"),
-                  _AchievementItem(icon: Icons.emoji_events, color: Colors.purple, title: "Maths Whiz", subtitle: "Won Monthly Challenge"),
-                ],
-              ),
-            )
-          ],
-        ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -61,16 +144,16 @@ class _StatItem extends StatelessWidget {
   final String value;
   final String label;
 
-  const _StatItem(this.value, this.label);
+  const _StatItem({required this.value, required this.label});
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Text(value, style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-        Text(label, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+        Text(value, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+        Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
       ],
-    );
+    ).animate().fadeIn().slideY(begin: 0.5, end: 0);
   }
 }
 
@@ -78,33 +161,37 @@ class _AchievementItem extends StatelessWidget {
   final IconData icon;
   final Color color;
   final String title;
-  final String subtitle;
+  final String desc;
 
-  const _AchievementItem({required this.icon, required this.color, required this.title, required this.subtitle});
+  const _AchievementItem({required this.icon, required this.color, required this.title, required this.desc});
 
   @override
   Widget build(BuildContext context) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.grey.shade200)),
+      decoration: BoxDecoration(
+        color: Colors.white, 
+        borderRadius: BorderRadius.circular(16), 
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 2))]
+      ),
       child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
             child: Icon(icon, color: color),
           ),
           const SizedBox(width: 16),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              Text(subtitle, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+              Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+              Text(desc, style: Theme.of(context).textTheme.bodySmall),
             ],
           )
         ],
       ),
-    );
+    ).animate().fadeIn().slideX(begin: 0.1, end: 0);
   }
 }

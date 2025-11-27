@@ -1,7 +1,17 @@
 import 'package:flutter/material.dart';
-import '../services/firebase_service.dart';
-import '../models/post_model.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import '../theme/app_theme.dart';
+import '../services/firebase_service.dart';
+import '../services/auth_service.dart';
+import '../models/post_model.dart';
+import '../models/user_model.dart';
+import 'create_post_screen.dart';
+import 'post_details_page.dart';
+
+import 'search_page.dart';
+import 'leaderboard_page.dart';
+import '../widgets/loading_widget.dart';
 
 class FeedPage extends StatefulWidget {
   const FeedPage({super.key});
@@ -19,114 +29,140 @@ class _FeedPageState extends State<FeedPage> {
       appBar: AppBar(
         title: const Text("QUBEX"),
         actions: [
-          IconButton(icon: const Icon(Icons.notifications_none), onPressed: () {}),
+          IconButton(
+            icon: const Icon(Icons.search, color: Colors.black),
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (context) => const SearchPage()));
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.emoji_events_outlined, color: Colors.black),
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (context) => const LeaderboardPage()));
+            },
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 16.0),
-            child: Chip(
-              label: const Text("IQ 420", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-              avatar: const Icon(Icons.bolt, size: 16, color: Colors.amber),
-              backgroundColor: AppTheme.secondary,
-              labelStyle: const TextStyle(color: Colors.white),
-              padding: EdgeInsets.zero,
-              visualDensity: VisualDensity.compact,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppTheme.secondary,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(color: AppTheme.secondary.withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 4))
+                ]
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.bolt, size: 16, color: AppTheme.accent),
+                  SizedBox(width: 4),
+                  Text("IQ 420", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.white)),
+                ],
+              ),
             ),
           )
         ],
       ),
-      body: Column(
-        children: [
-          // Post Input
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
-              child: Row(
+      body: FutureBuilder<UserModel?>(
+        future: _firebaseService.getUser(AuthService().currentUser?.uid ?? ''),
+        builder: (context, userSnapshot) {
+          if (userSnapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: LoadingWidget());
+          }
+
+          final user = userSnapshot.data;
+          final userGrade = user?.grade ?? '';
+
+          return StreamBuilder<List<PostModel>>(
+            stream: _firebaseService.getPosts(userGrade),
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return Center(child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Text("Error: ${snapshot.error}", textAlign: TextAlign.center, style: const TextStyle(color: Colors.red)),
+                ));
+              }
+
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: LoadingWidget());
+              }
+
+              final posts = snapshot.data ?? [];
+
+              return ListView(
+                padding: const EdgeInsets.all(16),
                 children: [
-                  const CircleAvatar(backgroundColor: AppTheme.primary, child: Text("C", style: TextStyle(color: Colors.white))),
-                  const SizedBox(width: 12),
-                  const Text("Ask a question...", style: TextStyle(color: Colors.grey)),
-                  const Spacer(),
-                  Icon(Icons.image_outlined, color: Colors.grey.shade400),
-                ],
-              ),
-            ),
-          ),
-          
-          // Feed Stream
-          Expanded(
-            child: StreamBuilder<List<PostModel>>(
-              stream: _firebaseService.getPosts(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                
-                if (snapshot.hasError) {
-                  // Fallback to static data if Firebase fails (likely due to missing config)
-                  return _buildStaticFeed();
-                }
+                  // Post Input
+                  GestureDetector(
+                    onTap: () {
+                      Navigator.push(context, MaterialPageRoute(builder: (context) => const CreatePostScreen()));
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white, 
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))
+                        ]
+                      ),
+                      child: Row(
+                        children: [
+                          CircleAvatar(
+                            backgroundColor: AppTheme.primary,
+                            backgroundImage: user?.photoUrl.isNotEmpty == true ? NetworkImage(user!.photoUrl) : null,
+                            child: user?.photoUrl.isEmpty == true ? const Icon(Icons.person, color: Colors.white) : null,
+                          ),
+                          const SizedBox(width: 12),
+                          Text("Ask a question...", style: Theme.of(context).textTheme.bodyMedium),
+                          const Spacer(),
+                          Icon(Icons.image_outlined, color: Colors.grey.shade400),
+                        ],
+                      ),
+                    ),
+                  ).animate().fade().slideY(begin: 0.2, end: 0, duration: 400.ms),
+                  
+                  const SizedBox(height: 20),
+                  
+                  if (posts.isEmpty)
+                    Center(child: Padding(
+                      padding: const EdgeInsets.all(20.0),
+                      child: Text("No posts for Grade $userGrade yet.", style: Theme.of(context).textTheme.bodyMedium),
+                    )),
 
-                final posts = snapshot.data ?? [];
-                
-                if (posts.isEmpty) {
-                  // Fallback if no posts
-                  return _buildStaticFeed();
-                }
-
-                return ListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: posts.length,
-                  itemBuilder: (context, index) {
-                    final post = posts[index];
-                    return FeedCard(
-                      type: post.type,
-                      author: post.authorName,
-                      school: post.school,
-                      content: post.content,
-                      likes: post.likes,
-                      comments: post.comments,
-                      isAchievement: post.isAchievement,
+                  // Dynamic Posts
+                  ...posts.asMap().entries.map((entry) {
+                    int index = entry.key;
+                    PostModel post = entry.value;
+                    return GestureDetector(
+                      onTap: () {
+                        Navigator.push(context, MaterialPageRoute(builder: (context) => PostDetailsPage(postId: post.id, post: post)));
+                      },
+                      child: FeedCard(
+                        type: post.type,
+                        author: post.authorName,
+                        authorPhotoUrl: post.authorPhotoUrl,
+                        school: post.school,
+                        content: post.content,
+                        likes: post.likes,
+                        comments: post.comments,
+                        isAchievement: post.isAchievement,
+                      ).animate(delay: (100 * index).ms).fade().slideX(begin: 0.1, end: 0),
                     );
-                  },
-                );
-              },
-            ),
-          ),
-        ],
+                  }),
+                ],
+              );
+            },
+          );
+        },
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () {},
+        onPressed: () {
+          Navigator.push(context, MaterialPageRoute(builder: (context) => const CreatePostScreen()));
+        },
         backgroundColor: AppTheme.primary,
         child: const Icon(Icons.add, color: Colors.white),
-      ),
-    );
-  }
-
-  Widget _buildStaticFeed() {
-    return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      children: const [
-        // Post 1: Question
-        FeedCard(
-          type: 'Question',
-          author: 'Sanduni Perera',
-          school: 'Visakha Vidyalaya',
-          content: 'Can someone explain the difference between Homologous and Analogous organs? Confused about the evolution part.',
-          likes: 24,
-          comments: 5,
-        ),
-        // Post 2: Achievement
-        FeedCard(
-          type: 'Achievement',
-          author: 'Kasun Bandara',
-          school: 'Royal College',
-          content: 'Just got selected for the National Physics Olympiad pool! Thanks everyone for the help.',
-          likes: 156,
-          comments: 42,
-          isAchievement: true,
-        ),
-      ],
+      ).animate().scale(delay: 500.ms),
     );
   }
 }
@@ -134,6 +170,7 @@ class _FeedPageState extends State<FeedPage> {
 class FeedCard extends StatelessWidget {
   final String type;
   final String author;
+  final String authorPhotoUrl;
   final String school;
   final String content;
   final int likes;
@@ -141,10 +178,11 @@ class FeedCard extends StatelessWidget {
   final bool isAchievement;
 
   const FeedCard({
-    super.key, 
-    required this.type, 
-    required this.author, 
-    required this.school, 
+    super.key,
+    required this.type,
+    required this.author,
+    this.authorPhotoUrl = '',
+    required this.school,
     required this.content,
     required this.likes,
     required this.comments,
@@ -156,45 +194,59 @@ class FeedCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: isAchievement ? Border.all(color: AppTheme.accent.withOpacity(0.5), width: 2) : null,
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 2))
+        ]
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
               CircleAvatar(
-                backgroundColor: isAchievement ? Colors.green.shade100 : Colors.blue.shade100,
-                child: Text(author.isNotEmpty ? author[0] : '?', style: TextStyle(color: isAchievement ? Colors.green : Colors.blue, fontWeight: FontWeight.bold)),
+                backgroundColor: isAchievement ? AppTheme.accent : AppTheme.primary.withOpacity(0.1),
+                backgroundImage: authorPhotoUrl.isNotEmpty ? NetworkImage(authorPhotoUrl) : null,
+                child: authorPhotoUrl.isEmpty 
+                  ? Icon(isAchievement ? Icons.emoji_events : Icons.person, color: isAchievement ? Colors.white : AppTheme.primary)
+                  : null,
               ),
               const SizedBox(width: 12),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(author, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                  Text(school, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                  Text(author, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                  Text(school, style: Theme.of(context).textTheme.bodySmall),
                 ],
               ),
               const Spacer(),
-              if (!isAchievement)
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(color: Colors.amber.shade50, borderRadius: BorderRadius.circular(8)),
-                child: const Text("QUESTION", style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.amber)),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isAchievement ? AppTheme.accent.withOpacity(0.1) : AppTheme.primary.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(type, style: TextStyle(color: isAchievement ? AppTheme.accent.withOpacity(1) : AppTheme.primary, fontSize: 12, fontWeight: FontWeight.bold)),
               )
             ],
           ),
           const SizedBox(height: 12),
-          Text(content, style: const TextStyle(fontSize: 15, height: 1.5)),
+          Text(content, style: Theme.of(context).textTheme.bodyLarge),
           const SizedBox(height: 16),
           Row(
             children: [
               Icon(Icons.favorite_border, size: 20, color: Colors.grey.shade400),
-              const SizedBox(width: 6),
-              Text(likes.toString(), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
-              const SizedBox(width: 20),
+              const SizedBox(width: 4),
+              Text("$likes", style: TextStyle(color: Colors.grey.shade600)),
+              const SizedBox(width: 16),
               Icon(Icons.chat_bubble_outline, size: 20, color: Colors.grey.shade400),
-              const SizedBox(width: 6),
-              Text(comments.toString(), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+              const SizedBox(width: 4),
+              Text("$comments", style: TextStyle(color: Colors.grey.shade600)),
+              const Spacer(),
+              Icon(Icons.share_outlined, size: 20, color: Colors.grey.shade400),
             ],
           )
         ],

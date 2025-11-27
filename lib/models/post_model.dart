@@ -4,7 +4,9 @@ class PostModel {
   final String id;
   final String authorId;
   final String authorName;
+  final String authorPhotoUrl;
   final String school;
+  final String grade;
   final String content;
   final String type; // 'Question' or 'Achievement'
   final int likes;
@@ -16,7 +18,9 @@ class PostModel {
     required this.id,
     required this.authorId,
     required this.authorName,
+    this.authorPhotoUrl = '',
     required this.school,
+    required this.grade,
     required this.content,
     required this.type,
     required this.likes,
@@ -30,7 +34,9 @@ class PostModel {
       id: id,
       authorId: map['authorId'] ?? '',
       authorName: map['authorName'] ?? 'Unknown',
+      authorPhotoUrl: map['authorPhotoUrl'] ?? '',
       school: map['school'] ?? '',
+      grade: map['grade'] ?? '',
       content: map['content'] ?? '',
       type: map['type'] ?? 'Question',
       likes: map['likes'] ?? 0,
@@ -44,7 +50,9 @@ class PostModel {
     return {
       'authorId': authorId,
       'authorName': authorName,
+      'authorPhotoUrl': authorPhotoUrl,
       'school': school,
+      'grade': grade,
       'content': content,
       'type': type,
       'likes': likes,

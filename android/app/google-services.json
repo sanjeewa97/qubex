@@ -12,7 +12,20 @@
           "package_name": "com.example.qubex"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "108541562462-gn0mhli78n209m5eve43v7uv1jstak2f.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.qubex",
+            "certificate_hash": "a1413abe8792d414701e0e69f704a509494b3a8a"
+          }
+        },
+        {
+          "client_id": "108541562462-36ja7krqpti3kgrslqvercge3qogfb0t.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyBImCqHvx7ZiHg3uvHGmCDM0fAac7CDGak"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "108541562462-36ja7krqpti3kgrslqvercge3qogfb0t.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
