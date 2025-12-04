@@ -34,9 +34,9 @@ class _SignUpScreenState extends State<SignUpScreen> {
         _emailController.text.trim(),
         _passwordController.text.trim(),
       );
-      // Navigation is handled by StreamBuilder in main.dart or we can push here
+      // Navigation is handled by StreamBuilder in main.dart
       if (mounted) {
-        Navigator.pop(context); // Go back to Login (or Main if we change flow)
+        Navigator.of(context).popUntil((route) => route.isFirst);
       }
     } catch (e) {
       if (mounted) {

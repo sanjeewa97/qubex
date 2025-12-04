@@ -8,6 +8,7 @@ import '../models/post_model.dart';
 import '../models/user_model.dart';
 import 'create_post_screen.dart';
 import 'post_details_page.dart';
+import 'profile_page.dart';
 
 import 'search_page.dart';
 import 'leaderboard_page.dart';
@@ -140,6 +141,7 @@ class _FeedPageState extends State<FeedPage> {
                       },
                       child: FeedCard(
                         type: post.type,
+                        authorId: post.authorId,
                         author: post.authorName,
                         authorPhotoUrl: post.authorPhotoUrl,
                         school: post.school,
@@ -169,6 +171,7 @@ class _FeedPageState extends State<FeedPage> {
 
 class FeedCard extends StatelessWidget {
   final String type;
+  final String authorId;
   final String author;
   final String authorPhotoUrl;
   final String school;
@@ -180,6 +183,7 @@ class FeedCard extends StatelessWidget {
   const FeedCard({
     super.key,
     required this.type,
+    required this.authorId,
     required this.author,
     this.authorPhotoUrl = '',
     required this.school,
@@ -205,33 +209,40 @@ class FeedCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              CircleAvatar(
-                backgroundColor: isAchievement ? AppTheme.accent : AppTheme.primary.withOpacity(0.1),
-                backgroundImage: authorPhotoUrl.isNotEmpty ? NetworkImage(authorPhotoUrl) : null,
-                child: authorPhotoUrl.isEmpty 
-                  ? Icon(isAchievement ? Icons.emoji_events : Icons.person, color: isAchievement ? Colors.white : AppTheme.primary)
-                  : null,
-              ),
-              const SizedBox(width: 12),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(author, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-                  Text(school, style: Theme.of(context).textTheme.bodySmall),
-                ],
-              ),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: isAchievement ? AppTheme.accent.withOpacity(0.1) : AppTheme.primary.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
+          GestureDetector(
+            onTap: () {
+              Navigator.push(context, MaterialPageRoute(builder: (context) => ProfilePage(userId: authorId)));
+            },
+            child: Row(
+              children: [
+                CircleAvatar(
+                  backgroundColor: isAchievement ? AppTheme.accent : AppTheme.primary.withOpacity(0.1),
+                  backgroundImage: authorPhotoUrl.isNotEmpty ? NetworkImage(authorPhotoUrl) : null,
+                  child: authorPhotoUrl.isEmpty 
+                    ? Icon(isAchievement ? Icons.emoji_events : Icons.person, color: isAchievement ? Colors.white : AppTheme.primary)
+                    : null,
                 ),
-                child: Text(type, style: TextStyle(color: isAchievement ? AppTheme.accent.withOpacity(1) : AppTheme.primary, fontSize: 12, fontWeight: FontWeight.bold)),
-              )
-            ],
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(author, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+                      Text(school, style: Theme.of(context).textTheme.bodySmall, overflow: TextOverflow.ellipsis),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: isAchievement ? AppTheme.accent.withOpacity(0.1) : AppTheme.primary.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(type, style: TextStyle(color: isAchievement ? AppTheme.accent.withOpacity(1) : AppTheme.primary, fontSize: 12, fontWeight: FontWeight.bold)),
+                )
+              ],
+            ),
           ),
           const SizedBox(height: 12),
           Text(content, style: Theme.of(context).textTheme.bodyLarge),

@@ -4,6 +4,8 @@ import '../theme/app_theme.dart';
 import '../models/user_model.dart';
 import '../services/firebase_service.dart';
 import '../services/auth_service.dart';
+import '../data/schools_data.dart';
+import '../widgets/loading_widget.dart';
 import 'main_app_scaffold.dart';
 
 class ProfileSetupScreen extends StatefulWidget {
@@ -23,11 +25,13 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   final TextEditingController _ageController = TextEditingController();
   
   String? _selectedGrade;
+  String? _selectedStream; // New for A/L
   String? _selectedGender;
   bool _isLoading = false;
 
   final List<String> _grades = ['6', '7', '8', '9', '10', '11', '12', '13', 'University', 'Other'];
-  final List<String> _genders = ['Male', 'Female', 'Other'];
+  final List<String> _streams = ['Physical Science', 'Biological Science', 'Commerce', 'Arts', 'Technology']; // A/L Streams
+  final List<String> _genders = ['Male', 'Female'];
 
   @override
   void initState() {
@@ -49,6 +53,12 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       return;
     }
 
+    // Validate Stream for A/L
+    if ((_selectedGrade == '12' || _selectedGrade == '13') && _selectedStream == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Please select your Stream")));
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
@@ -58,10 +68,12 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       final userModel = UserModel(
         id: user.uid,
         name: _nameController.text.trim(),
+        searchName: _nameController.text.trim().toLowerCase(),
         school: _schoolController.text.trim(),
         avatarUrl: user.photoURL ?? '',
         photoUrl: user.photoURL ?? '',
         grade: _selectedGrade!,
+        stream: _selectedStream ?? '', // Save stream
         age: int.tryParse(_ageController.text.trim()) ?? 0,
         gender: _selectedGender!,
         iqScore: 0, // Initial score
@@ -122,11 +134,37 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
               ),
               const SizedBox(height: 16),
 
-              // School
-              TextFormField(
-                controller: _schoolController,
-                decoration: const InputDecoration(labelText: "School", prefixIcon: Icon(Icons.school_outlined)),
-                validator: (v) => v!.isEmpty ? "Required" : null,
+              // School Autocomplete
+              Autocomplete<String>(
+                optionsBuilder: (TextEditingValue textEditingValue) {
+                  if (textEditingValue.text == '') {
+                    return const Iterable<String>.empty();
+                  }
+                  return kSriLankanSchools.where((String option) {
+                    return option.toLowerCase().contains(textEditingValue.text.toLowerCase());
+                  });
+                },
+                onSelected: (String selection) {
+                  _schoolController.text = selection;
+                },
+                fieldViewBuilder: (BuildContext context, TextEditingController fieldTextEditingController, FocusNode fieldFocusNode, VoidCallback onFieldSubmitted) {
+                  // Sync controllers
+                  if (fieldTextEditingController.text.isEmpty && _schoolController.text.isNotEmpty) {
+                    fieldTextEditingController.text = _schoolController.text;
+                  }
+                  
+                  // Listen to changes to update the main controller if user types a custom name
+                  fieldTextEditingController.addListener(() {
+                     _schoolController.text = fieldTextEditingController.text;
+                  });
+
+                  return TextFormField(
+                    controller: fieldTextEditingController,
+                    focusNode: fieldFocusNode,
+                    decoration: const InputDecoration(labelText: "School", prefixIcon: Icon(Icons.school_outlined)),
+                    validator: (v) => v!.isEmpty ? "Required" : null,
+                  );
+                },
               ),
               const SizedBox(height: 16),
 
@@ -135,9 +173,25 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                 value: _selectedGrade,
                 decoration: const InputDecoration(labelText: "Grade", prefixIcon: Icon(Icons.class_outlined)),
                 items: _grades.map((g) => DropdownMenuItem(value: g, child: Text(g))).toList(),
-                onChanged: (v) => setState(() => _selectedGrade = v),
+                onChanged: (v) => setState(() {
+                  _selectedGrade = v;
+                  if (v != '12' && v != '13') {
+                    _selectedStream = null; // Reset stream if not A/L
+                  }
+                }),
               ),
               const SizedBox(height: 16),
+
+              // Stream (Dropdown) - Only for Grade 12 & 13
+              if (_selectedGrade == '12' || _selectedGrade == '13') ...[
+                DropdownButtonFormField<String>(
+                  value: _selectedStream,
+                  decoration: const InputDecoration(labelText: "Stream", prefixIcon: Icon(Icons.category_outlined)),
+                  items: _streams.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+                  onChanged: (v) => setState(() => _selectedStream = v),
+                ).animate().fade().slideY(),
+                const SizedBox(height: 16),
+              ],
 
               // Age & Gender Row
               Row(
@@ -174,7 +228,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
                   ),
                   child: _isLoading 
-                    ? const CircularProgressIndicator(color: Colors.white) 
+                    ? const LoadingWidget(color: Colors.white, size: 20) 
                     : const Text("Save & Continue", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 ),
               ),

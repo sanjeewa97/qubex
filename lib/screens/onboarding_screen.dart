@@ -4,6 +4,9 @@ import '../theme/app_theme.dart';
 import '../services/auth_service.dart';
 import 'login_screen.dart';
 import '../widgets/loading_widget.dart';
+import 'main_app_scaffold.dart';
+import 'profile_setup_screen.dart';
+import '../services/firebase_service.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -42,11 +45,48 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   Future<void> _handleGoogleSignIn() async {
     setState(() => _isSigningIn = true);
     try {
-      await _authService.signInWithGoogle();
-      // Auth state change will handle navigation in main.dart
+      final user = await _authService.signInWithGoogle();
+      
+      if (user == null) {
+        if (mounted) {
+          showDialog(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text("Sign In Cancelled"),
+              content: const Text("Google Sign-In was cancelled."),
+              actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text("OK"))],
+            ),
+          );
+        }
+      } else {
+        // Explicitly check profile and navigate to avoid "stuck" UI
+        if (mounted) {
+          final profile = await FirebaseService().getUser(user.uid);
+          if (mounted) {
+            if (profile != null) {
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(builder: (context) => const MainAppScaffold()),
+                (route) => false,
+              );
+            } else {
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(builder: (context) => const ProfileSetupScreen()),
+                (route) => false,
+              );
+            }
+          }
+        }
+      }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Sign in failed: $e")));
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text("Sign In Failed"),
+            content: Text("Error: $e\n\nPlease check if SHA-1 fingerprint is added to Firebase Console."),
+            actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text("OK"))],
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _isSigningIn = false);

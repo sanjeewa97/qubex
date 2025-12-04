@@ -7,6 +7,8 @@ import '../models/user_model.dart';
 import '../models/note_model.dart';
 import '../models/comment_model.dart';
 import '../models/notification_model.dart';
+import '../models/chat_model.dart';
+import '../models/message_model.dart';
 
 class FirebaseService {
   // final FirebaseFirestore _firestore = FirebaseFirestore.instance; // This causes crash if not initialized
@@ -39,6 +41,25 @@ class FirebaseService {
       });
     } catch (e) {
       print("Error fetching posts: $e");
+      return Stream.value([]);
+    }
+  }
+  
+  // Fetch posts by a specific user
+  Stream<List<PostModel>> getUserPosts(String userId) {
+    try {
+      return _firestore
+          .collection('posts')
+          .where('authorId', isEqualTo: userId)
+          .orderBy('timestamp', descending: true)
+          .snapshots()
+          .map((snapshot) {
+        return snapshot.docs.map((doc) {
+          return PostModel.fromMap(doc.data(), doc.id);
+        }).toList();
+      });
+    } catch (e) {
+      print("Error fetching user posts: $e");
       return Stream.value([]);
     }
   }
@@ -79,6 +100,17 @@ class FirebaseService {
     }
     return null;
   }
+
+  // Save user FCM token
+  Future<void> saveUserToken(String userId, String token) async {
+    try {
+      await _firestore.collection('users').doc(userId).update({
+        'fcmToken': token,
+      });
+    } catch (e) {
+      print("Error saving user token: $e");
+    }
+  }
   
   // Create or update user
   Future<void> updateUser(UserModel user) async {
@@ -86,6 +118,30 @@ class FirebaseService {
       await _firestore.collection('users').doc(user.id).set(user.toMap(), SetOptions(merge: true));
     } catch (e) {
       print("Error updating user: $e");
+    }
+  }
+
+  // Upload profile photo
+  Future<String> uploadProfilePhoto(String userId, File imageFile) async {
+    try {
+      final storageRef = FirebaseStorage.instance
+          .ref()
+          .child('profile_photos')
+          .child('$userId.jpg');
+
+      final uploadTask = await storageRef.putFile(imageFile);
+      final downloadUrl = await uploadTask.ref.getDownloadURL();
+
+      // Update user document with new photo URL
+      await _firestore.collection('users').doc(userId).update({
+        'photoUrl': downloadUrl,
+        'avatarUrl': downloadUrl,
+      });
+
+      return downloadUrl;
+    } catch (e) {
+      print("Error uploading profile photo: $e");
+      rethrow;
     }
   }
 
@@ -108,14 +164,13 @@ class FirebaseService {
     if (query.isEmpty) return [];
     
     try {
-      // Simple search: name starts with query
-      // Note: Firestore is case-sensitive by default. 
-      // For a robust search, we'd need a 'searchName' field (lowercase) or Algolia.
-      // For MVP, we'll assume exact case or just rely on this simple query.
+      // Case-insensitive search using searchName
+      String searchKey = query.toLowerCase();
+      
       QuerySnapshot snapshot = await _firestore
           .collection('users')
-          .where('name', isGreaterThanOrEqualTo: query)
-          .where('name', isLessThan: '${query}z')
+          .where('searchName', isGreaterThanOrEqualTo: searchKey)
+          .where('searchName', isLessThan: '${searchKey}z')
           .get();
 
       return snapshot.docs.map((doc) {
@@ -286,5 +341,207 @@ class FirebaseService {
         .where('isRead', isEqualTo: false)
         .snapshots()
         .map((snapshot) => snapshot.docs.length);
+  }
+  // --- CHAT ---
+
+  // Create or get existing chat
+  Future<String> createChat(String currentUserId, String otherUserId) async {
+    try {
+      // Check if chat already exists
+      QuerySnapshot snapshot = await _firestore
+          .collection('chats')
+          .where('participants', arrayContains: currentUserId)
+          .get();
+
+      for (var doc in snapshot.docs) {
+        List<dynamic> participants = doc['participants'];
+        if (participants.contains(otherUserId)) {
+          return doc.id; // Chat exists
+        }
+      }
+
+      // Create new chat
+      DocumentReference ref = await _firestore.collection('chats').add({
+        'participants': [currentUserId, otherUserId],
+        'lastMessage': '',
+        'lastMessageTime': FieldValue.serverTimestamp(),
+        'unreadCounts': {
+          currentUserId: 0,
+          otherUserId: 0,
+        },
+      });
+      return ref.id;
+    } catch (e) {
+      print("Error creating chat: $e");
+      throw e;
+    }
+  }
+
+  // Create group chat
+  Future<String> createGroupChat(String name, File? image, List<String> userIds) async {
+    try {
+      String? imageUrl;
+      if (image != null) {
+        String fileName = '${DateTime.now().millisecondsSinceEpoch}_group_${userIds.hashCode}';
+        Reference ref = FirebaseStorage.instance.ref().child('group_images/$fileName');
+        UploadTask uploadTask = ref.putFile(image);
+        TaskSnapshot snapshot = await uploadTask;
+        imageUrl = await snapshot.ref.getDownloadURL();
+      }
+
+      Map<String, int> unreadCounts = {};
+      for (var id in userIds) {
+        unreadCounts[id] = 0;
+      }
+
+      DocumentReference ref = await _firestore.collection('chats').add({
+        'participants': userIds,
+        'lastMessage': 'Group created',
+        'lastMessageTime': FieldValue.serverTimestamp(),
+        'unreadCounts': unreadCounts,
+        'isGroup': true,
+        'groupName': name,
+        'groupImage': imageUrl,
+        'adminIds': [userIds.first], // Assuming first user is creator/admin
+      });
+      return ref.id;
+    } catch (e) {
+      print("Error creating group chat: $e");
+      throw e;
+    }
+  }
+
+  // Leave group chat
+  Future<void> leaveGroupChat(String chatId, String userId) async {
+    try {
+      await _firestore.collection('chats').doc(chatId).update({
+        'participants': FieldValue.arrayRemove([userId]),
+        'adminIds': FieldValue.arrayRemove([userId]), // Remove from admins if applicable
+      });
+    } catch (e) {
+      print("Error leaving group chat: $e");
+      throw e;
+    }
+  }
+
+  // Add member to group
+  Future<void> addMemberToGroup(String chatId, String userId) async {
+    try {
+      await _firestore.collection('chats').doc(chatId).update({
+        'participants': FieldValue.arrayUnion([userId]),
+        'unreadCounts.$userId': 0, // Initialize unread count
+      });
+    } catch (e) {
+      print("Error adding member to group: $e");
+      throw e;
+    }
+  }
+
+  // Update group image
+  Future<void> updateGroupImage(String chatId, File image) async {
+    try {
+      String fileName = '${DateTime.now().millisecondsSinceEpoch}_group_$chatId';
+      Reference ref = FirebaseStorage.instance.ref().child('group_images/$fileName');
+      UploadTask uploadTask = ref.putFile(image);
+      TaskSnapshot snapshot = await uploadTask;
+      String imageUrl = await snapshot.ref.getDownloadURL();
+
+      await _firestore.collection('chats').doc(chatId).update({
+        'groupImage': imageUrl,
+      });
+    } catch (e) {
+      print("Error updating group image: $e");
+      throw e;
+    }
+  }
+  
+  // Upload chat attachment
+  Future<String> uploadChatAttachment(File file, String chatId) async {
+    try {
+      String fileName = '${DateTime.now().millisecondsSinceEpoch}_${file.uri.pathSegments.last}';
+      Reference ref = FirebaseStorage.instance.ref().child('chat_attachments/$chatId/$fileName');
+      UploadTask uploadTask = ref.putFile(file);
+      TaskSnapshot snapshot = await uploadTask;
+      return await snapshot.ref.getDownloadURL();
+    } catch (e) {
+      print("Error uploading chat attachment: $e");
+      throw e;
+    }
+  }
+
+  // Get chats stream
+  Stream<List<ChatModel>> getChats(String userId) {
+    return _firestore
+        .collection('chats')
+        .where('participants', arrayContains: userId)
+        .orderBy('lastMessageTime', descending: true)
+        .snapshots()
+        .map((snapshot) {
+      return snapshot.docs.map((doc) {
+        return ChatModel.fromFirestore(doc);
+      }).toList();
+    });
+  }
+
+  // Get single chat stream
+  Stream<ChatModel> getChatStream(String chatId) {
+    return _firestore.collection('chats').doc(chatId).snapshots().map((doc) {
+      return ChatModel.fromFirestore(doc);
+    });
+  }
+
+  // Get messages stream
+  Stream<List<MessageModel>> getMessages(String chatId) {
+    return _firestore
+        .collection('chats')
+        .doc(chatId)
+        .collection('messages')
+        .orderBy('timestamp', descending: true)
+        .snapshots()
+        .map((snapshot) {
+      return snapshot.docs.map((doc) {
+        return MessageModel.fromFirestore(doc);
+      }).toList();
+    });
+  }
+
+  // Send message
+  Future<void> sendMessage(String chatId, MessageModel message, List<String> otherUserIds) async {
+    try {
+      // 1. Add message to sub-collection
+      await _firestore
+          .collection('chats')
+          .doc(chatId)
+          .collection('messages')
+          .add(message.toMap());
+
+      // 2. Update chat metadata (last message, time, unread count)
+      Map<String, dynamic> updates = {
+        'lastMessage': message.attachmentUrl != null 
+            ? (message.attachmentType == 'image' ? '📷 Image' : '📎 Attachment') 
+            : message.content,
+        'lastMessageTime': FieldValue.serverTimestamp(),
+      };
+
+      for (var userId in otherUserIds) {
+        updates['unreadCounts.$userId'] = FieldValue.increment(1);
+      }
+
+      await _firestore.collection('chats').doc(chatId).update(updates);
+    } catch (e) {
+      print("Error sending message: $e");
+      throw e;
+    }
+  }
+
+  // Mark chat as read
+  Future<void> markChatAsRead(String chatId, String userId) async {
+    try {
+      await _firestore.collection('chats').doc(chatId).update({
+        'unreadCounts.$userId': 0,
+      });
+    } catch (e) {
+      print("Error marking chat as read: $e");
+    }
   }
 }

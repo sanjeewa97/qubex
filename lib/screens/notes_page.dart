@@ -20,8 +20,112 @@ class NotesPage extends StatefulWidget {
 class _NotesPageState extends State<NotesPage> {
   final FirebaseService _firebaseService = FirebaseService();
   final AuthService _authService = AuthService();
-  String _selectedSubject = "Maths"; // Default subject
+  
+  // State
+  String? _selectedSubject; // If null, show folders. If set, show notes.
   bool _isUploading = false;
+  UserModel? _currentUser;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUser();
+  }
+
+  Future<void> _loadUser() async {
+    final user = _authService.currentUser;
+    if (user != null) {
+      final userData = await _firebaseService.getUser(user.uid);
+      if (mounted) {
+        setState(() => _currentUser = userData);
+      }
+    }
+  }
+
+  // Dynamic Subject List based on Grade and Stream
+  List<Map<String, dynamic>> get _subjects {
+    if (_currentUser == null) return [];
+
+    final grade = _currentUser!.grade;
+    final stream = _currentUser!.stream;
+
+    // A/L Logic (Grade 12 & 13)
+    if (grade == '12' || grade == '13') {
+      switch (stream) {
+        case 'Physical Science':
+          return [
+            {'name': 'Combined Maths', 'icon': Icons.calculate, 'color': Colors.blue},
+            {'name': 'Physics', 'icon': Icons.speed, 'color': Colors.red},
+            {'name': 'Chemistry', 'icon': Icons.science, 'color': Colors.green},
+            {'name': 'ICT', 'icon': Icons.computer, 'color': Colors.purple},
+            {'name': 'General English', 'icon': Icons.language, 'color': Colors.orange},
+          ];
+        case 'Biological Science':
+          return [
+            {'name': 'Biology', 'icon': Icons.biotech, 'color': Colors.teal},
+            {'name': 'Physics', 'icon': Icons.speed, 'color': Colors.red},
+            {'name': 'Chemistry', 'icon': Icons.science, 'color': Colors.green},
+            {'name': 'ICT', 'icon': Icons.computer, 'color': Colors.purple},
+            {'name': 'General English', 'icon': Icons.language, 'color': Colors.orange},
+          ];
+        case 'Commerce':
+          return [
+            {'name': 'Accounting', 'icon': Icons.account_balance, 'color': Colors.blueGrey},
+            {'name': 'Business Studies', 'icon': Icons.business, 'color': Colors.indigo},
+            {'name': 'Economics', 'icon': Icons.trending_up, 'color': Colors.green},
+            {'name': 'ICT', 'icon': Icons.computer, 'color': Colors.purple},
+            {'name': 'General English', 'icon': Icons.language, 'color': Colors.orange},
+          ];
+        case 'Arts':
+          return [
+            {'name': 'Sinhala', 'icon': Icons.menu_book, 'color': Colors.brown},
+            {'name': 'History', 'icon': Icons.history_edu, 'color': Colors.orange},
+            {'name': 'Geography', 'icon': Icons.public, 'color': Colors.green},
+            {'name': 'Political Science', 'icon': Icons.gavel, 'color': Colors.red},
+            {'name': 'ICT', 'icon': Icons.computer, 'color': Colors.purple},
+            {'name': 'General English', 'icon': Icons.language, 'color': Colors.orange},
+          ];
+        case 'Technology':
+          return [
+            {'name': 'SFT', 'icon': Icons.science_outlined, 'color': Colors.teal},
+            {'name': 'ET', 'icon': Icons.engineering, 'color': Colors.blue},
+            {'name': 'ICT', 'icon': Icons.computer, 'color': Colors.purple},
+            {'name': 'General English', 'icon': Icons.language, 'color': Colors.orange},
+          ];
+        default:
+          return [
+            {'name': 'General', 'icon': Icons.folder, 'color': Colors.grey},
+          ];
+      }
+    } 
+    // University
+    else if (grade == 'University') {
+       return [
+        {'name': 'Lecture Notes', 'icon': Icons.menu_book, 'color': Colors.blue},
+        {'name': 'Assignments', 'icon': Icons.assignment, 'color': Colors.green},
+        {'name': 'Past Papers', 'icon': Icons.history, 'color': Colors.orange},
+        {'name': 'Research', 'icon': Icons.science, 'color': Colors.purple},
+        {'name': 'Other', 'icon': Icons.folder_open, 'color': Colors.grey},
+      ];
+    }
+    // O/L Logic (Grade 6-11)
+    else {
+      return [
+        {'name': 'Maths', 'icon': Icons.calculate, 'color': Colors.blue},
+        {'name': 'Science', 'icon': Icons.science, 'color': Colors.green},
+        {'name': 'Sinhala', 'icon': Icons.menu_book, 'color': Colors.brown},
+        {'name': 'English', 'icon': Icons.language, 'color': Colors.orange},
+        {'name': 'History', 'icon': Icons.history_edu, 'color': Colors.red},
+        {'name': 'Religion', 'icon': Icons.self_improvement, 'color': Colors.purple},
+        {'name': 'ICT', 'icon': Icons.computer, 'color': Colors.indigo},
+        {'name': 'Commerce', 'icon': Icons.store, 'color': Colors.teal},
+        {'name': 'Health', 'icon': Icons.health_and_safety, 'color': Colors.pink},
+        {'name': 'Geography', 'icon': Icons.public, 'color': Colors.lightGreen},
+        {'name': 'Tamil', 'icon': Icons.translate, 'color': Colors.deepOrange},
+        {'name': 'Other', 'icon': Icons.folder_open, 'color': Colors.grey},
+      ];
+    }
+  }
 
   Future<void> _uploadNote() async {
     final user = _authService.currentUser;
@@ -42,6 +146,7 @@ class _NotesPageState extends State<NotesPage> {
 
       // Show dialog to enter title
       TextEditingController titleController = TextEditingController(text: fileName.replaceAll('.pdf', ''));
+      String uploadSubject = _selectedSubject ?? _subjects.first['name']; // Default to first available
       
       if (!mounted) return;
       
@@ -58,9 +163,9 @@ class _NotesPageState extends State<NotesPage> {
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
-                value: _selectedSubject,
-                items: ["Maths", "Physics", "Chemistry", "ICT"].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
-                onChanged: (val) => _selectedSubject = val!,
+                value: _subjects.any((s) => s['name'] == uploadSubject) ? uploadSubject : _subjects.first['name'],
+                items: _subjects.map((s) => DropdownMenuItem<String>(value: s['name'], child: Text(s['name']))).toList(),
+                onChanged: (val) => uploadSubject = val!,
                 decoration: const InputDecoration(labelText: "Subject"),
               )
             ],
@@ -70,7 +175,7 @@ class _NotesPageState extends State<NotesPage> {
             ElevatedButton(
               onPressed: () {
                 Navigator.pop(context);
-                _performUpload(file, titleController.text, _selectedSubject, user.displayName ?? "Unknown", user.uid);
+                _performUpload(file, titleController.text, uploadSubject, user.displayName ?? "Unknown", user.uid);
               },
               child: const Text("Upload"),
             )
@@ -83,6 +188,7 @@ class _NotesPageState extends State<NotesPage> {
   Future<void> _performUpload(File file, String title, String subject, String author, String userId) async {
     setState(() => _isUploading = true);
     try {
+      // Re-fetch user to ensure we have latest grade/stream
       final userModel = await _firebaseService.getUser(userId);
       await _firebaseService.uploadNote(
         file, 
@@ -117,93 +223,28 @@ class _NotesPageState extends State<NotesPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_currentUser == null) {
+      return const Scaffold(body: Center(child: LoadingWidget()));
+    }
+
     return Scaffold(
-      appBar: AppBar(title: const Text("Knowledge Hub")),
+      appBar: AppBar(
+        title: Text(_selectedSubject ?? "Knowledge Hub"),
+        leading: _selectedSubject != null 
+          ? IconButton(
+              icon: const Icon(Icons.arrow_back, color: Colors.black),
+              onPressed: () => setState(() => _selectedSubject = null),
+            )
+          : null,
+      ),
       body: Column(
         children: [
-          // Subject Selector
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Row(
-              children: [
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () => setState(() => _selectedSubject = "Maths"),
-                    child: _SubjectCard(
-                      title: "Maths", 
-                      color: _selectedSubject == "Maths" ? AppTheme.primary.withOpacity(0.1) : Colors.white, 
-                      icon: Icons.calculate, 
-                      iconColor: _selectedSubject == "Maths" ? AppTheme.primary : Colors.grey,
-                      isSelected: _selectedSubject == "Maths",
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: GestureDetector(
-                    onTap: () => setState(() => _selectedSubject = "Physics"),
-                    child: _SubjectCard(
-                      title: "Physics", 
-                      color: _selectedSubject == "Physics" ? AppTheme.accent.withOpacity(0.1) : Colors.white, 
-                      icon: Icons.speed, 
-                      iconColor: _selectedSubject == "Physics" ? AppTheme.accent : Colors.grey,
-                      isSelected: _selectedSubject == "Physics",
-                    ),
-                  ),
-                ),
-              ],
-            ).animate().fade().slideY(begin: -0.2, end: 0),
-          ),
-          
           if (_isUploading) const LinearProgressIndicator(),
-
+          
           Expanded(
-            child: FutureBuilder<UserModel?>(
-              future: _firebaseService.getUser(AuthService().currentUser?.uid ?? ''),
-              builder: (context, userSnapshot) {
-                if (userSnapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: LoadingWidget());
-                }
-
-                final user = userSnapshot.data;
-                final userGrade = user?.grade ?? '';
-                final userSchool = user?.school ?? '';
-
-                return StreamBuilder<List<NoteModel>>(
-                  stream: _firebaseService.getNotes(_selectedSubject, userGrade, userSchool),
-                  builder: (context, snapshot) {
-                    if (snapshot.hasError) {
-                      return Center(child: Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Text("Error: ${snapshot.error}", textAlign: TextAlign.center, style: const TextStyle(color: Colors.red)),
-                      ));
-                    }
-
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: LoadingWidget());
-                    }
-                    
-                    final notes = snapshot.data ?? [];
-                    
-                    if (notes.isEmpty) {
-                      return Center(child: Text("No $_selectedSubject notes for Grade $userGrade yet.", style: Theme.of(context).textTheme.bodyMedium));
-                    }
-
-                    return ListView.builder(
-                      padding: const EdgeInsets.all(16),
-                      itemCount: notes.length,
-                      itemBuilder: (context, index) {
-                        final note = notes[index];
-                        return GestureDetector(
-                          onTap: () => _openNote(note.fileUrl),
-                          child: _NoteTile(title: note.title, author: note.authorName, size: note.size),
-                        ).animate(delay: (100 * index).ms).fade().slideX();
-                      },
-                    );
-                  },
-                );
-              },
-            ),
+            child: _selectedSubject == null 
+              ? _buildFolderGrid() 
+              : _buildNotesList(),
           ),
         ],
       ),
@@ -215,35 +256,100 @@ class _NotesPageState extends State<NotesPage> {
       ).animate().scale(delay: 500.ms),
     );
   }
-}
 
-class _SubjectCard extends StatelessWidget {
-  final String title;
-  final Color color;
-  final IconData icon;
-  final Color iconColor;
-  final bool isSelected;
+  Widget _buildFolderGrid() {
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: _subjects.length,
+      itemBuilder: (context, index) {
+        final subject = _subjects[index];
+        return GestureDetector(
+          onTap: () => setState(() => _selectedSubject = subject['name']),
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))
+              ]
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: (subject['color'] as Color).withOpacity(0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(subject['icon'], size: 24, color: subject['color']),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(subject['name'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      const Text("Folder", style: TextStyle(color: Colors.grey, fontSize: 12)),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right, color: Colors.grey),
+              ],
+            ),
+          ).animate(delay: (50 * index).ms).slideX().fade(),
+        );
+      },
+    );
+  }
 
-  const _SubjectCard({required this.title, required this.color, required this.icon, required this.iconColor, required this.isSelected});
+  Widget _buildNotesList() {
+    // We already have _currentUser loaded
+    final userGrade = _currentUser?.grade ?? '';
+    final userSchool = _currentUser?.school ?? '';
 
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 80,
-      decoration: BoxDecoration(
-        color: color, 
-        borderRadius: BorderRadius.circular(20),
-        border: isSelected ? Border.all(color: iconColor, width: 2) : Border.all(color: Colors.grey.shade200),
-        boxShadow: isSelected ? [BoxShadow(color: iconColor.withOpacity(0.2), blurRadius: 8, offset: const Offset(0, 4))] : []
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, color: iconColor, size: 24),
-          const SizedBox(height: 4),
-          Text(title, style: TextStyle(fontWeight: FontWeight.bold, color: iconColor)),
-        ],
-      ),
+    return StreamBuilder<List<NoteModel>>(
+      stream: _firebaseService.getNotes(_selectedSubject, userGrade, userSchool),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Center(child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Text("Error: ${snapshot.error}", textAlign: TextAlign.center, style: const TextStyle(color: Colors.red)),
+          ));
+        }
+
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: LoadingWidget());
+        }
+        
+        final notes = snapshot.data ?? [];
+        
+        if (notes.isEmpty) {
+          return Center(child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.folder_open, size: 64, color: Colors.grey.shade300),
+              const SizedBox(height: 16),
+              Text("No $_selectedSubject notes for Grade $userGrade yet.", style: Theme.of(context).textTheme.bodyMedium),
+              const SizedBox(height: 8),
+              TextButton(onPressed: _uploadNote, child: const Text("Upload the first one!"))
+            ],
+          ));
+        }
+
+        return ListView.builder(
+          padding: const EdgeInsets.all(16),
+          itemCount: notes.length,
+          itemBuilder: (context, index) {
+            final note = notes[index];
+            return GestureDetector(
+              onTap: () => _openNote(note.fileUrl),
+              child: _NoteTile(title: note.title, author: note.authorName, size: note.size),
+            ).animate(delay: (50 * index).ms).fade().slideX();
+          },
+        );
+      },
     );
   }
 }

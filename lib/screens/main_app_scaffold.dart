@@ -7,7 +7,8 @@ import '../services/auth_service.dart';
 import 'feed_page.dart';
 import 'notes_page.dart';
 import 'profile_page.dart';
-import 'notifications_page.dart';
+import 'profile_page.dart';
+import 'chat_list_screen.dart';
 
 class MainAppScaffold extends StatefulWidget {
   const MainAppScaffold({super.key});
@@ -21,7 +22,7 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
   final List<Widget> _pages = [
     const FeedPage(),
     const NotesPage(),
-    const NotificationsPage(),
+    const ChatListScreen(),
     const ProfilePage(),
   ];
 
@@ -45,7 +46,7 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
             children: [
               _buildNavItem(0, Icons.grid_view_rounded, "Feed"),
               _buildNavItem(1, Icons.library_books_rounded, "Notes"),
-              _buildNavItem(2, Icons.notifications_rounded, "Alerts", isBadge: true),
+              _buildNavItem(2, Icons.chat_bubble_rounded, "Chat", isBadge: true),
               _buildNavItem(3, Icons.person_rounded, "Me"),
             ],
           ),
@@ -73,7 +74,13 @@ class _MainAppScaffoldState extends State<MainAppScaffold> {
           children: [
             if (isBadge)
               StreamBuilder<int>(
-                stream: user != null ? FirebaseService().getUnreadNotificationCount(user.uid) : Stream.value(0),
+                // Use a different stream for chat unread count if available, or keep notification count for now?
+                // Ideally we should have a getUnreadChatCount stream.
+                // For now, let's use a placeholder or 0 until we implement unread chat count stream.
+                // Actually, ChatListScreen handles its own badges inside.
+                // But for the main tab badge, we need a stream of total unread chats.
+                // Let's assume 0 for now to avoid errors, or create the stream.
+                stream: Stream.value(0), // TODO: Implement getUnreadChatCount
                 builder: (context, snapshot) {
                   final count = snapshot.data ?? 0;
                   return Badge(

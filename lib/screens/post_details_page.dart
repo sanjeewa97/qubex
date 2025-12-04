@@ -106,6 +106,7 @@ class _PostDetailsPageState extends State<PostDetailsPage> {
                 // Original Post
                 FeedCard(
                   type: _post!.type,
+                  authorId: _post!.authorId,
                   author: _post!.authorName,
                   authorPhotoUrl: _post!.authorPhotoUrl,
                   school: _post!.school,

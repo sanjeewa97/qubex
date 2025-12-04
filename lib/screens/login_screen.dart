@@ -27,6 +27,10 @@ class _LoginScreenState extends State<LoginScreen> {
         _passwordController.text.trim(),
       );
       // Navigation is handled by StreamBuilder in main.dart
+      // We need to pop the login screen so the new home (MainAppScaffold) is revealed
+      if (mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

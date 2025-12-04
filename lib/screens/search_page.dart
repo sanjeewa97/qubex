@@ -7,6 +7,7 @@ import '../models/note_model.dart';
 import '../theme/app_theme.dart';
 import '../widgets/loading_widget.dart';
 import 'post_details_page.dart';
+import 'profile_page.dart';
 
 import '../services/auth_service.dart';
 
@@ -161,7 +162,8 @@ class _SearchPageState extends State<SearchPage> with SingleTickerProviderStateM
           title: Text(user.name, style: const TextStyle(fontWeight: FontWeight.bold)),
           subtitle: Text(user.school),
           onTap: () {
-            // Navigate to user profile (future feature)
+            // Navigate to user profile
+            Navigator.push(context, MaterialPageRoute(builder: (context) => ProfilePage(userId: user.id)));
           },
         ).animate().fadeIn().slideX();
       },
