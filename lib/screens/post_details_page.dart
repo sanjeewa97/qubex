@@ -105,6 +105,8 @@ class _PostDetailsPageState extends State<PostDetailsPage> {
               children: [
                 // Original Post
                 FeedCard(
+                  postId: _post!.id,
+                  currentUserId: _authService.currentUser?.uid ?? '',
                   type: _post!.type,
                   authorId: _post!.authorId,
                   author: _post!.authorName,
@@ -114,6 +116,19 @@ class _PostDetailsPageState extends State<PostDetailsPage> {
                   likes: _post!.likes,
                   comments: _post!.comments, // Note: This might be stale until refresh
                   isAchievement: _post!.isAchievement,
+                  imageUrl: _post!.imageUrl,
+                  isLiked: _post!.likedBy.contains(_authService.currentUser?.uid),
+                  pollOptions: _post!.pollOptions,
+                  pollVotes: _post!.pollVotes,
+                  correctOptionIndex: _post!.correctOptionIndex,
+                  onVote: (index) async {
+                    await _firebaseService.voteOnPoll(_post!.id, index);
+                    _fetchPost();
+                  },
+                  onLike: () async {
+                    await _firebaseService.toggleLike(_post!.id, _post!.authorId);
+                    _fetchPost(); // Refresh logic to show new like count/state
+                  },
                 ),
                 const Divider(height: 32),
                 const Text("Comments", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
@@ -137,7 +152,21 @@ class _PostDetailsPageState extends State<PostDetailsPage> {
                     }
 
                     return Column(
-                      children: comments.map((comment) => _CommentTile(comment: comment)).toList(),
+                      children: comments.map((comment) {
+                        final isAccepted = _post!.acceptedCommentId == comment.id;
+                        final isAuthor = _post!.authorId == _authService.currentUser?.uid;
+                        final canAccept = isAuthor && _post!.acceptedCommentId == null; // Only accept if none accepted
+                        
+                        return _CommentTile(
+                          comment: comment,
+                          isAccepted: isAccepted,
+                          canAccept: canAccept,
+                          onAccept: () async {
+                            await _firebaseService.markCommentAsAccepted(widget.postId, comment.id, comment.authorId);
+                            _fetchPost(); // Refresh to update UI
+                          },
+                        );
+                      }).toList(),
                     );
                   },
                 ),
@@ -184,8 +213,16 @@ class _PostDetailsPageState extends State<PostDetailsPage> {
 
 class _CommentTile extends StatelessWidget {
   final CommentModel comment;
+  final bool isAccepted;
+  final bool canAccept;
+  final VoidCallback? onAccept;
 
-  const _CommentTile({required this.comment});
+  const _CommentTile({
+    required this.comment,
+    this.isAccepted = false,
+    this.canAccept = false,
+    this.onAccept,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -193,9 +230,12 @@ class _CommentTile extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isAccepted ? Colors.green.withValues(alpha: 0.05) : Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade100),
+        border: Border.all(
+          color: isAccepted ? Colors.green : Colors.grey.shade100,
+          width: isAccepted ? 2 : 1
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -204,7 +244,7 @@ class _CommentTile extends StatelessWidget {
             children: [
               CircleAvatar(
                 radius: 12,
-                backgroundColor: AppTheme.primary.withOpacity(0.1),
+                backgroundColor: AppTheme.primary.withValues(alpha: 0.1),
                 backgroundImage: comment.authorPhotoUrl.isNotEmpty ? NetworkImage(comment.authorPhotoUrl) : null,
                 child: comment.authorPhotoUrl.isEmpty 
                   ? const Icon(Icons.person, size: 14, color: AppTheme.primary)
@@ -212,11 +252,30 @@ class _CommentTile extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Text(comment.authorName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+              if (isAccepted) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.green,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Text("Accepted Answer", style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                )
+              ],
               const Spacer(),
-              Text(
-                "${comment.timestamp.hour}:${comment.timestamp.minute.toString().padLeft(2, '0')}", 
-                style: const TextStyle(color: Colors.grey, fontSize: 10)
-              ),
+              if (canAccept)
+                TextButton.icon(
+                  onPressed: onAccept,
+                  icon: const Icon(Icons.check_circle_outline, size: 16, color: Colors.green),
+                  label: const Text("Accept", style: TextStyle(color: Colors.green, fontSize: 12)),
+                  style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(60, 30)),
+                )
+              else
+                Text(
+                  "${comment.timestamp.hour}:${comment.timestamp.minute.toString().padLeft(2, '0')}", 
+                  style: const TextStyle(color: Colors.grey, fontSize: 10)
+                ),
             ],
           ),
           const SizedBox(height: 8),

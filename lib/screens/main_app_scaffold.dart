@@ -7,7 +7,6 @@ import '../services/auth_service.dart';
 import 'feed_page.dart';
 import 'notes_page.dart';
 import 'profile_page.dart';
-import 'profile_page.dart';
 import 'chat_list_screen.dart';
 
 class MainAppScaffold extends StatefulWidget {
@@ -18,6 +17,18 @@ class MainAppScaffold extends StatefulWidget {
 }
 
 class _MainAppScaffoldState extends State<MainAppScaffold> {
+  @override
+  void initState() {
+    super.initState();
+    _checkStreak();
+  }
+
+  void _checkStreak() {
+    final user = AuthService().currentUser;
+    if (user != null) {
+      FirebaseService().updateUserStreak(user.uid);
+    }
+  }
   int _currentIndex = 0;
   final List<Widget> _pages = [
     const FeedPage(),

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
 import '../theme/app_theme.dart';
 import '../models/post_model.dart';
 import '../services/firebase_service.dart';
@@ -16,14 +18,64 @@ class CreatePostScreen extends StatefulWidget {
 
 class _CreatePostScreenState extends State<CreatePostScreen> {
   final _contentController = TextEditingController();
+  final List<TextEditingController> _optionControllers = [];
   final FirebaseService _firebaseService = FirebaseService();
   final AuthService _authService = AuthService();
   
-  String _selectedType = 'Question'; // Question or Achievement
+  String _selectedType = 'Question'; // Question, Achievement, Poll, Quiz
   bool _isLoading = false;
+  int? _correctOptionIndex; // For Quiz
+  File? _selectedImage;
+  final ImagePicker _picker = ImagePicker();
+
+  @override
+  void initState() {
+    super.initState();
+    _addOption(); // Start with 2 options
+    _addOption();
+  }
+
+  void _addOption() {
+    if (_optionControllers.length < 4) {
+      setState(() {
+        _optionControllers.add(TextEditingController());
+      });
+    }
+  }
+
+  void _removeOption(int index) {
+    if (_optionControllers.length > 2) {
+      setState(() {
+        _optionControllers.removeAt(index);
+        if (_correctOptionIndex == index) _correctOptionIndex = null;
+        if (_correctOptionIndex != null && _correctOptionIndex! > index) {
+          _correctOptionIndex = _correctOptionIndex! - 1;
+        }
+      });
+    }
+  }
+
+  Future<void> _pickImage() async {
+    final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
+    if (image != null) {
+      setState(() => _selectedImage = File(image.path));
+    }
+  }
 
   Future<void> _createPost() async {
     if (_contentController.text.trim().isEmpty) return;
+
+    // Validation for Poll/Quiz
+    if (_selectedType == 'Poll' || _selectedType == 'Quiz') {
+      if (_optionControllers.any((c) => c.text.trim().isEmpty)) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Please fill all options")));
+        return;
+      }
+      if (_selectedType == 'Quiz' && _correctOptionIndex == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Please select a correct answer for the quiz")));
+        return;
+      }
+    }
 
     setState(() => _isLoading = true);
 
@@ -33,6 +85,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
       // Fetch latest user data from Firestore
       final userModel = await _firebaseService.getUser(user.uid);
+
+      // Upload Image if selected
+      String? imageUrl;
+      if (_selectedImage != null) {
+         imageUrl = await _firebaseService.uploadPostImage(_selectedImage!);
+      }
 
       // Create Post Model
       final post = PostModel(
@@ -48,6 +106,11 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         likes: 0,
         comments: 0,
         isAchievement: _selectedType == 'Achievement',
+        pollOptions: (_selectedType == 'Poll' || _selectedType == 'Quiz') 
+            ? _optionControllers.map((c) => c.text.trim()).toList() 
+            : [],
+        correctOptionIndex: _selectedType == 'Quiz' ? _correctOptionIndex : null,
+        imageUrl: imageUrl, 
       );
 
       await _firebaseService.createPost(post);
@@ -73,8 +136,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
-        iconTheme: const IconThemeData(color: Colors.black),
+        leading: IconButton(
+          icon: const Icon(Icons.close, color: Colors.black),
+          onPressed: () => Navigator.pop(context),
+        ),
         title: const Text("Create Post", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+        centerTitle: true,
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 16.0),
@@ -92,57 +159,238 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           )
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20.0),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // User Info Row
+            // User Header
             Row(
               children: [
-                const CircleAvatar(
+                CircleAvatar(
+                  radius: 20,
                   backgroundColor: AppTheme.secondary,
-                  child: Icon(Icons.person, color: Colors.white),
+                  backgroundImage: _authService.currentUser?.photoURL != null ? NetworkImage(_authService.currentUser!.photoURL!) : null,
+                  child: _authService.currentUser?.photoURL == null ? const Icon(Icons.person, color: Colors.white) : null,
                 ),
                 const SizedBox(width: 12),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(_authService.currentUser?.email?.split('@')[0] ?? "User", style: const TextStyle(fontWeight: FontWeight.bold)),
-                    
-                    // Type Selector
-                    GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          _selectedType = _selectedType == 'Question' ? 'Achievement' : 'Question';
-                        });
-                      },
-                      child: Row(
-                        children: [
-                          Text(_selectedType, style: TextStyle(color: _selectedType == 'Question' ? AppTheme.primary : Colors.purple, fontSize: 12, fontWeight: FontWeight.bold)),
-                          const Icon(Icons.arrow_drop_down, size: 16, color: Colors.grey),
-                        ],
-                      ),
+                    Text(
+                      _authService.currentUser?.displayName ?? _authService.currentUser?.email?.split('@')[0] ?? "User",
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                    ),
+                    Text(
+                      "Public • ${_authService.currentUser?.email != null ? "Grade 13" : ""}", // Placeholder or fetch actual grade
+                      style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
                     ),
                   ],
                 )
               ],
             ),
             
-            const SizedBox(height: 24),
+            const SizedBox(height: 20),
 
-            // Content Input
-            Expanded(
-              child: TextField(
-                controller: _contentController,
-                maxLines: null,
-                decoration: const InputDecoration(
-                  hintText: "What's on your mind?",
-                  border: InputBorder.none,
-                  hintStyle: TextStyle(fontSize: 20, color: Colors.grey),
-                ),
-                style: const TextStyle(fontSize: 20),
+            // Type Selector (Chips)
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: ['Question', 'Achievement', 'Poll', 'Quiz'].map((type) {
+                  final isSelected = _selectedType == type;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8.0),
+                    child: ChoiceChip(
+                      label: Text(type),
+                      selected: isSelected,
+                      onSelected: (selected) {
+                        if (selected) setState(() => _selectedType = type);
+                      },
+                      selectedColor: AppTheme.primary,
+                      backgroundColor: Colors.grey.shade100,
+                      labelStyle: TextStyle(
+                        color: isSelected ? Colors.white : Colors.black,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20),
+                        side: BorderSide(color: isSelected ? AppTheme.primary : Colors.transparent),
+                      ),
+                    ),
+                  );
+                }).toList(),
               ),
             ),
+
+            const SizedBox(height: 20),
+
+            // Content Input
+            TextField(
+              controller: _contentController,
+              maxLines: null,
+              minLines: 4,
+              decoration: InputDecoration(
+                hintText: _selectedType == 'Quiz' 
+                    ? "Ask your quiz question here..." 
+                    : _selectedType == 'Poll' 
+                        ? "Ask your poll question..." 
+                        : "What's on your mind?",
+                border: InputBorder.none,
+                hintStyle: TextStyle(fontSize: 20, color: Colors.grey.shade400),
+              ),
+              style: const TextStyle(fontSize: 20),
+            ),
+            
+            // Image Preview
+            if (_selectedImage != null)
+              Stack(
+                children: [
+                  Container(
+                    margin: const EdgeInsets.only(top: 16),
+                    height: 200,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      image: DecorationImage(image: FileImage(_selectedImage!), fit: BoxFit.cover),
+                    ),
+                  ),
+                  Positioned(
+                    top: 24,
+                    right: 8,
+                    child: GestureDetector(
+                      onTap: () => setState(() => _selectedImage = null),
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+                        child: const Icon(Icons.close, color: Colors.white, size: 20),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              
+            // Add Photo Button
+            if (_selectedImage == null)
+              Padding(
+                padding: const EdgeInsets.only(top: 16.0),
+                child: TextButton.icon(
+                  onPressed: _pickImage,
+                  icon: const Icon(Icons.add_photo_alternate_outlined, color: AppTheme.primary),
+                  label: const Text("Add Photo", style: TextStyle(color: AppTheme.primary)),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    backgroundColor: AppTheme.primary.withValues(alpha: 0.1),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
+                  ),
+                ),
+              ),
+
+            // Poll / Quiz Options Section
+            if (_selectedType == 'Poll' || _selectedType == 'Quiz') ...[
+              const SizedBox(height: 20),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.grey.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          _selectedType == 'Quiz' ? "QUIZ OPTIONS" : "POLL OPTIONS",
+                          style: TextStyle(
+                            color: Colors.grey.shade600,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                            letterSpacing: 1.2,
+                          ),
+                        ),
+                        if (_selectedType == 'Quiz')
+                          const Text(
+                            "(Tap circle for correct answer)",
+                            style: TextStyle(color: Colors.green, fontSize: 10, fontStyle: FontStyle.italic),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    
+                    ...List.generate(_optionControllers.length, (index) {
+                      final isCorrect = _correctOptionIndex == index;
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: (_selectedType == 'Quiz' && isCorrect) 
+                                ? Colors.green 
+                                : Colors.grey.shade300,
+                            width: (_selectedType == 'Quiz' && isCorrect) ? 2 : 1,
+                          ),
+                          boxShadow: [
+                            BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 4, offset: const Offset(0, 2))
+                          ],
+                        ),
+                        child: Row(
+                          children: [
+                            if (_selectedType == 'Quiz')
+                              GestureDetector(
+                                onTap: () => setState(() => _correctOptionIndex = index),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12.0),
+                                  child: Icon(
+                                    isCorrect ? Icons.check_circle : Icons.radio_button_unchecked,
+                                    color: isCorrect ? Colors.green : Colors.grey,
+                                  ),
+                                ),
+                              )
+                            else 
+                              const Padding(
+                                padding: EdgeInsets.all(12.0),
+                                child: Icon(Icons.drag_indicator, color: Colors.grey, size: 20),
+                              ),
+                              
+                            Expanded(
+                              child: TextField(
+                                controller: _optionControllers[index],
+                                decoration: InputDecoration(
+                                  hintText: "Option ${index + 1}",
+                                  border: InputBorder.none,
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 0, vertical: 12),
+                                ),
+                              ),
+                            ),
+                            
+                            if (_optionControllers.length > 2)
+                              IconButton(
+                                icon: const Icon(Icons.close, color: Colors.grey, size: 20),
+                                onPressed: () => _removeOption(index),
+                              )
+                          ],
+                        ),
+                      );
+                    }),
+                    
+                    if (_optionControllers.length < 4)
+                      Center(
+                        child: TextButton.icon(
+                          onPressed: _addOption,
+                          icon: const Icon(Icons.add_circle_outline),
+                          label: const Text("Add Option"),
+                          style: TextButton.styleFrom(
+                            foregroundColor: AppTheme.primary,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ]
           ],
         ),
       ),

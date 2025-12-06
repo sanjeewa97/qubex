@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'auth_service.dart';
 import '../models/post_model.dart';
 import '../models/user_model.dart';
 import '../models/note_model.dart';
@@ -9,10 +10,9 @@ import '../models/comment_model.dart';
 import '../models/notification_model.dart';
 import '../models/chat_model.dart';
 import '../models/message_model.dart';
+import '../models/iq_history_model.dart';
 
 class FirebaseService {
-  // final FirebaseFirestore _firestore = FirebaseFirestore.instance; // This causes crash if not initialized
-  
   FirebaseFirestore get _firestore => FirebaseFirestore.instance;
 
   // --- POSTS ---
@@ -64,6 +64,20 @@ class FirebaseService {
     }
   }
 
+  // Upload post image
+  Future<String> uploadPostImage(File imageFile) async {
+    try {
+      String fileName = '${DateTime.now().millisecondsSinceEpoch}_post';
+      Reference ref = FirebaseStorage.instance.ref().child('post_images/$fileName');
+      UploadTask uploadTask = ref.putFile(imageFile);
+      TaskSnapshot snapshot = await uploadTask;
+      return await snapshot.ref.getDownloadURL();
+    } catch (e) {
+      print("Error uploading post image: $e");
+      throw e;
+    }
+  }
+
   // Create a new post
   Future<void> createPost(PostModel post) async {
     try {
@@ -99,6 +113,16 @@ class FirebaseService {
       print("Error fetching user: $e");
     }
     return null;
+  }
+
+  // Get User Stream (Real-time)
+  Stream<UserModel?> getUserStream(String uid) {
+    return _firestore.collection('users').doc(uid).snapshots().map((doc) {
+      if (doc.exists) {
+        return UserModel.fromMap(doc.data()!, doc.id);
+      }
+      return null;
+    });
   }
 
   // Save user FCM token
@@ -145,6 +169,114 @@ class FirebaseService {
     }
   }
 
+  // --- ANALYTICS ---
+
+  // Update Daily Streak
+  Future<void> updateUserStreak(String userId) async {
+    try {
+      final docRef = _firestore.collection('users').doc(userId);
+      final doc = await docRef.get();
+      
+      if (!doc.exists) return;
+
+      final data = doc.data() as Map<String, dynamic>;
+      final lastActiveTimestamp = data['lastActiveDate'] as Timestamp?;
+      final currentStreak = data['streakCount'] as int? ?? 0;
+
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      
+      if (lastActiveTimestamp == null) {
+        // First time login or clean state
+        await docRef.update({
+          'streakCount': 1,
+          'lastActiveDate': Timestamp.fromDate(now),
+        });
+        return;
+      }
+
+      final lastDate = lastActiveTimestamp.toDate();
+      final lastActiveDay = DateTime(lastDate.year, lastDate.month, lastDate.day);
+
+      if (lastActiveDay.isAtSameMomentAs(today)) {
+        // Already active today, do nothing
+        return;
+      }
+
+      if (lastActiveDay.difference(today).inDays == -1) {
+        // Was active yesterday, increment streak
+        await docRef.update({
+          'streakCount': currentStreak + 1,
+          'lastActiveDate': Timestamp.fromDate(now),
+        });
+      } else {
+        // Missed a day or more, reset streak
+        await docRef.update({
+          'streakCount': 1,
+          'lastActiveDate': Timestamp.fromDate(now),
+        });
+      }
+    } catch (e) {
+      print("Error updating streak: $e");
+    }
+  }
+
+  // Log IQ Score and add to history
+  Future<void> logIQScore(String userId, double newScore) async {
+    try {
+      // 1. Update main user document
+      await _firestore.collection('users').doc(userId).update({
+        'iqScore': newScore,
+      });
+
+      // 2. Add to history sub-collection
+      await _firestore.collection('users').doc(userId).collection('iq_history').add({
+        'date': Timestamp.now(),
+        'score': newScore,
+      });
+    } catch (e) {
+      print("Error logging IQ score: $e");
+    }
+  }
+
+  // Increment IQ Score
+  Future<void> incrementIQ(String userId, double amount) async {
+    try {
+      final userRef = _firestore.collection('users').doc(userId);
+      await _firestore.runTransaction((transaction) async {
+        final snapshot = await transaction.get(userRef);
+        if (!snapshot.exists) return;
+        
+        final currentScore = (snapshot.data()?['iqScore'] ?? 0).toDouble();
+        final newScore = currentScore + amount;
+        
+        transaction.update(userRef, {'iqScore': newScore});
+        
+        // Add to history
+        final historyRef = userRef.collection('iq_history').doc();
+        transaction.set(historyRef, {
+          'date': Timestamp.now(),
+          'score': newScore,
+        });
+      });
+    } catch (e) {
+      print("Error incrementing IQ: $e");
+    }
+  }
+
+  // Get IQ History
+  Stream<List<IQHistoryModel>> getIQHistory(String userId) {
+    return _firestore
+        .collection('users')
+        .doc(userId)
+        .collection('iq_history')
+        .orderBy('date', descending: false)
+        .snapshots()
+        .map((snapshot) {
+      return snapshot.docs.map((doc) => IQHistoryModel.fromMap(doc.data())).toList();
+    });
+  }
+
   // Get top users for leaderboard
   Stream<List<UserModel>> getTopUsers() {
     return _firestore
@@ -157,6 +289,112 @@ class FirebaseService {
         return UserModel.fromMap(doc.data(), doc.id);
       }).toList();
     });
+  }
+
+
+
+  // Toggle Like (No IQ Change)
+  Future<void> toggleLike(String postId, String authorId) async {
+    final currentUserId = AuthService().currentUser?.uid;
+    if (currentUserId == null) return;
+    
+    final postRef = _firestore.collection('posts').doc(postId);
+    
+    try {
+      await _firestore.runTransaction((transaction) async {
+        final snapshot = await transaction.get(postRef);
+        if (!snapshot.exists) throw Exception("Post not found");
+
+        List<String> likedBy = List<String>.from(snapshot.data()?['likedBy'] ?? []);
+        int likes = snapshot.data()?['likes'] ?? 0;
+
+        if (likedBy.contains(currentUserId)) {
+          likedBy.remove(currentUserId);
+          likes = (likes > 0) ? likes - 1 : 0;
+        } else {
+          likedBy.add(currentUserId);
+          likes += 1;
+        }
+
+        transaction.update(postRef, {
+          'likedBy': likedBy,
+          'likes': likes,
+        });
+      });
+    } catch (e) {
+      print("Error toggling like: $e");
+    }
+  }
+
+  // Mark Comment as Accepted Answer (+1 IQ)
+  Future<void> markCommentAsAccepted(String postId, String commentId, String commentAuthorId) async {
+    final postRef = _firestore.collection('posts').doc(postId);
+    
+    try {
+      await _firestore.runTransaction((transaction) async {
+        final snapshot = await transaction.get(postRef);
+        if (!snapshot.exists) return;
+        
+        // Check if already is accepted
+        final currentAcceptedId = snapshot.data()?['acceptedCommentId'];
+        if (currentAcceptedId != null) {
+          // Already has an accepted answer, prevent changing or throw
+          return; 
+        }
+
+        transaction.update(postRef, {'acceptedCommentId': commentId});
+      });
+
+      // Award 1 IQ to the comment author
+      await incrementIQ(commentAuthorId, 1.0);
+      
+      // Optionally notify the user
+    } catch (e) {
+      print("Error marking comment as accepted: $e");
+    }
+  }
+
+  // Vote on Poll / Quiz
+  Future<void> voteOnPoll(String postId, int optionIndex) async {
+    final currentUserId = AuthService().currentUser?.uid;
+    if (currentUserId == null) return;
+
+    final postRef = _firestore.collection('posts').doc(postId);
+
+    double iqDelta = 0.0;
+
+    try {
+      await _firestore.runTransaction((transaction) async {
+        final snapshot = await transaction.get(postRef);
+        if (!snapshot.exists) return;
+
+        Map<String, int> votes = Map<String, int>.from(snapshot.data()?['pollVotes'] ?? {});
+        final correctIndex = snapshot.data()?['correctOptionIndex']; // Check if it's a quiz
+
+        if (votes.containsKey(currentUserId)) {
+          // Already voted
+          return;
+        }
+
+        votes[currentUserId] = optionIndex;
+
+        transaction.update(postRef, {'pollVotes': votes});
+
+        // Quiz Logic: If correct, award IQ
+        if (correctIndex != null && optionIndex == correctIndex) {
+          iqDelta = 0.2; // Small reward for correct quiz answer
+        }
+      });
+      
+      // Award IQ outside transaction to avoid race conditions with user doc
+      if (iqDelta > 0) {
+        await incrementIQ(currentUserId, iqDelta);
+        // Optional: Trigger "You got it right!" local notification or effect
+      }
+
+    } catch (e) {
+      print("Error voting on poll: $e");
+    }
   }
 
   // Search users by name
@@ -213,6 +451,9 @@ class FirebaseService {
       );
 
       await _firestore.collection('notes').add(note.toMap());
+      
+      // No IQ points for notes (User request)
+      // await incrementIQ(userId, 1.0);
     } catch (e) {
       print("Error uploading note: $e");
       throw e;
@@ -262,15 +503,11 @@ class FirebaseService {
         String postAuthorId = postSnap.get('authorId');
         
         // Don't notify if commenting on own post
-        if (postAuthorId != comment.authorId) { // Assuming comment has authorId, if not pass it
-          // We need current user ID for 'fromUserId'. 
-          // Ideally CommentModel should have it, or we pass it.
-          // For now assuming we can get it or it's in comment.
-          
+        if (postAuthorId != comment.authorId) {
           NotificationModel notification = NotificationModel(
             id: '',
             type: 'comment',
-            fromUserId: comment.id, // Using comment ID as temp or need real user ID
+            fromUserId: comment.id, 
             fromUserName: comment.authorName,
             postId: postId,
             message: "commented on your post",

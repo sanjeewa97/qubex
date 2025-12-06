@@ -4,7 +4,6 @@ import '../theme/app_theme.dart';
 import '../services/auth_service.dart';
 import '../services/firebase_service.dart';
 import '../models/user_model.dart';
-import 'profile_setup_screen.dart';
 import 'edit_profile_screen.dart';
 
 import '../widgets/loading_widget.dart';
@@ -14,6 +13,7 @@ import '../models/post_model.dart';
 import 'feed_page.dart'; // For FeedCard
 import 'post_details_page.dart';
 import 'onboarding_screen.dart';
+import 'stats_tab.dart'; // Import StatsTab
 
 class ProfilePage extends StatefulWidget {
   final String? userId; // If null, show current user
@@ -178,9 +178,27 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                             ),
                           ).animate().scale(),
                           const SizedBox(height: 16),
-                          Text(
-                            name,
-                            style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                name,
+                                style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+                              ),
+                              if ((userModel?.streakCount ?? 0) > 0) ...[
+                                const SizedBox(width: 8),
+                                const Icon(Icons.local_fire_department_rounded, color: Colors.orange, size: 28)
+                                    .animate(onPlay: (c) => c.repeat())
+                                    .shimmer(duration: 2000.ms, color: Colors.yellow)
+                                    .scaleXY(end: 1.2, duration: 1000.ms, curve: Curves.easeInOut)
+                                    .then()
+                                    .scaleXY(end: 1.0, duration: 1000.ms),
+                                Text(
+                                  "${userModel!.streakCount}",
+                                  style: const TextStyle(color: Colors.orange, fontSize: 18, fontWeight: FontWeight.bold),
+                                ),
+                              ],
+                            ],
                           ).animate().fadeIn().slideY(begin: 0.5, end: 0),
                           Text(
                             school,
@@ -239,7 +257,7 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                       indicatorWeight: 3,
                       tabs: const [
                         Tab(text: "Activity"),
-                        Tab(text: "Badges"),
+                        Tab(text: "Stats"), // Changed from Badges
                         Tab(text: "About"),
                       ],
                     ),
@@ -254,8 +272,8 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                 // Activity Tab
                 _buildActivityTab(firebaseService, targetUserId),
                 
-                // Badges Tab
-                _buildBadgesTab(),
+                // Stats Tab
+                if (userModel != null) StatsTab(user: userModel) else const SizedBox(),
 
                 // About Tab
                 _buildAboutTab(userModel),
@@ -300,6 +318,8 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                 Navigator.push(context, MaterialPageRoute(builder: (context) => PostDetailsPage(postId: post.id, post: post)));
               },
               child: FeedCard(
+                postId: post.id,
+                currentUserId: AuthService().currentUser?.uid ?? '',
                 type: post.type,
                 authorId: post.authorId,
                 author: post.authorName,
@@ -309,6 +329,12 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                 likes: post.likes,
                 comments: post.comments,
                 isAchievement: post.isAchievement,
+                imageUrl: post.imageUrl,
+                pollOptions: post.pollOptions,
+                pollVotes: post.pollVotes,
+                correctOptionIndex: post.correctOptionIndex,
+                onLike: () => firebaseService.toggleLike(post.id, post.authorId),
+                onVote: (optionIndex) => firebaseService.voteOnPoll(post.id, optionIndex),
               ).animate(delay: (50 * index).ms).fadeIn().slideY(begin: 0.1, end: 0),
             );
           },
@@ -317,17 +343,6 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
     );
   }
 
-  Widget _buildBadgesTab() {
-    return ListView(
-      padding: const EdgeInsets.all(24),
-      children: const [
-        _AchievementItem(title: "First Question", desc: "Asked your first question", icon: Icons.star, color: Colors.amber),
-        _AchievementItem(title: "Helper", desc: "Answered 5 questions", icon: Icons.handshake, color: Colors.blue),
-        _AchievementItem(title: "Scholar", desc: "Uploaded 10 notes", icon: Icons.book, color: Colors.purple),
-        _AchievementItem(title: "Top 10", desc: "Reached top 10 in leaderboard", icon: Icons.emoji_events, color: Colors.orange),
-      ],
-    );
-  }
 
   Widget _buildAboutTab(UserModel? userModel) {
     if (userModel == null) return const SizedBox();

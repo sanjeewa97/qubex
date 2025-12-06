@@ -53,13 +53,19 @@ class _FeedPageState extends State<FeedPage> {
                   BoxShadow(color: AppTheme.secondary.withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 4))
                 ]
               ),
-              child: const Row(
-                children: [
-                  Icon(Icons.bolt, size: 16, color: AppTheme.accent),
-                  SizedBox(width: 4),
-                  Text("IQ 420", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.white)),
-                ],
-              ),
+              child: StreamBuilder<UserModel?>(
+                    stream: FirebaseService().getUserStream(AuthService().currentUser?.uid ?? ''),
+                    builder: (context, snapshot) {
+                      final iq = snapshot.data?.iqScore ?? 0;
+                      return Row(
+                        children: [
+                          const Icon(Icons.bolt, size: 16, color: AppTheme.accent),
+                          const SizedBox(width: 4),
+                          Text("IQ ${iq.toStringAsFixed(1)}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.white)),
+                        ],
+                      );
+                    }
+                  ),
             ),
           )
         ],
@@ -140,6 +146,8 @@ class _FeedPageState extends State<FeedPage> {
                         Navigator.push(context, MaterialPageRoute(builder: (context) => PostDetailsPage(postId: post.id, post: post)));
                       },
                       child: FeedCard(
+                        postId: post.id, // Add postId
+                        currentUserId: AuthService().currentUser?.uid ?? '', // Add currentUserId
                         type: post.type,
                         authorId: post.authorId,
                         author: post.authorName,
@@ -149,6 +157,13 @@ class _FeedPageState extends State<FeedPage> {
                         likes: post.likes,
                         comments: post.comments,
                         isAchievement: post.isAchievement,
+                        imageUrl: post.imageUrl, // Add imageUrl usage
+                        isLiked: post.likedBy.contains(user?.id),
+                        pollOptions: post.pollOptions,
+                        pollVotes: post.pollVotes,
+                        correctOptionIndex: post.correctOptionIndex,
+                        onLike: () => _firebaseService.toggleLike(post.id, post.authorId),
+                        onVote: (optionIndex) => _firebaseService.voteOnPoll(post.id, optionIndex),
                       ).animate(delay: (100 * index).ms).fade().slideX(begin: 0.1, end: 0),
                     );
                   }),
@@ -170,6 +185,8 @@ class _FeedPageState extends State<FeedPage> {
 }
 
 class FeedCard extends StatelessWidget {
+  final String postId;
+  final String currentUserId;
   final String type;
   final String authorId;
   final String author;
@@ -179,9 +196,18 @@ class FeedCard extends StatelessWidget {
   final int likes;
   final int comments;
   final bool isAchievement;
+  final String? imageUrl; // Add field
+  final bool isLiked;
+  final VoidCallback? onLike;
+  final List<String> pollOptions;
+  final Map<String, int> pollVotes;
+  final int? correctOptionIndex;
+  final Function(int)? onVote;
 
   const FeedCard({
     super.key,
+    required this.postId,
+    required this.currentUserId,
     required this.type,
     required this.authorId,
     required this.author,
@@ -191,6 +217,13 @@ class FeedCard extends StatelessWidget {
     required this.likes,
     required this.comments,
     this.isAchievement = false,
+    this.imageUrl, // Add imageUrl to constructor
+    this.isLiked = false,
+    this.onLike,
+    this.pollOptions = const [],
+    this.pollVotes = const {},
+    this.correctOptionIndex,
+    this.onVote,
   });
 
   @override
@@ -201,14 +234,15 @@ class FeedCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        border: isAchievement ? Border.all(color: AppTheme.accent.withOpacity(0.5), width: 2) : null,
+        border: isAchievement ? Border.all(color: AppTheme.accent.withValues(alpha: 0.5), width: 2) : null,
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 8, offset: const Offset(0, 2))
+          BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 8, offset: const Offset(0, 2))
         ]
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Header
           GestureDetector(
             onTap: () {
               Navigator.push(context, MaterialPageRoute(builder: (context) => ProfilePage(userId: authorId)));
@@ -216,7 +250,7 @@ class FeedCard extends StatelessWidget {
             child: Row(
               children: [
                 CircleAvatar(
-                  backgroundColor: isAchievement ? AppTheme.accent : AppTheme.primary.withOpacity(0.1),
+                  backgroundColor: isAchievement ? AppTheme.accent : AppTheme.primary.withValues(alpha: 0.1),
                   backgroundImage: authorPhotoUrl.isNotEmpty ? NetworkImage(authorPhotoUrl) : null,
                   child: authorPhotoUrl.isEmpty 
                     ? Icon(isAchievement ? Icons.emoji_events : Icons.person, color: isAchievement ? Colors.white : AppTheme.primary)
@@ -236,22 +270,49 @@ class FeedCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
-                    color: isAchievement ? AppTheme.accent.withOpacity(0.1) : AppTheme.primary.withOpacity(0.1),
+                    color: isAchievement ? AppTheme.accent.withValues(alpha: 0.1) : AppTheme.primary.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Text(type, style: TextStyle(color: isAchievement ? AppTheme.accent.withOpacity(1) : AppTheme.primary, fontSize: 12, fontWeight: FontWeight.bold)),
+                  child: Text(type, style: TextStyle(color: isAchievement ? AppTheme.accent.withValues(alpha: 1) : AppTheme.primary, fontSize: 12, fontWeight: FontWeight.bold)),
                 )
               ],
             ),
           ),
+          
           const SizedBox(height: 12),
           Text(content, style: Theme.of(context).textTheme.bodyLarge),
+          if (imageUrl != null && imageUrl!.isNotEmpty) ...[
+             const SizedBox(height: 12),
+             ClipRRect(
+               borderRadius: BorderRadius.circular(12),
+               child: Image.network(imageUrl!, width: double.infinity, fit: BoxFit.cover),
+             ),
+          ],
           const SizedBox(height: 16),
+
+          // Poll/Quiz Rendering
+          if (pollOptions.isNotEmpty) ...[
+            _buildPollOptions(),
+            const SizedBox(height: 16),
+          ],
+
+          // Actions
           Row(
             children: [
-              Icon(Icons.favorite_border, size: 20, color: Colors.grey.shade400),
-              const SizedBox(width: 4),
-              Text("$likes", style: TextStyle(color: Colors.grey.shade600)),
+              GestureDetector(
+                onTap: onLike,
+                child: Row(
+                  children: [
+                    Icon(
+                      isLiked ? Icons.favorite : Icons.favorite_border, 
+                      size: 20, 
+                      color: isLiked ? Colors.red : Colors.grey.shade400
+                    ).animate(target: isLiked ? 1 : 0).scale(begin: const Offset(1, 1), end: const Offset(1.2, 1.2), duration: 200.ms),
+                    const SizedBox(width: 4),
+                    Text("$likes", style: TextStyle(color: isLiked ? Colors.red : Colors.grey.shade600)),
+                  ],
+                ),
+              ),
               const SizedBox(width: 16),
               Icon(Icons.chat_bubble_outline, size: 20, color: Colors.grey.shade400),
               const SizedBox(width: 4),
@@ -262,6 +323,101 @@ class FeedCard extends StatelessWidget {
           )
         ],
       ),
+    );
+  }
+
+  Widget _buildPollOptions() {
+    final hasVoted = pollVotes.containsKey(currentUserId);
+    final totalVotes = pollVotes.length;
+    final isQuiz = correctOptionIndex != null;
+
+    return Column(
+      children: List.generate(pollOptions.length, (index) {
+        final option = pollOptions[index];
+        final voteCount = pollVotes.values.where((v) => v == index).length;
+        final percentage = totalVotes > 0 ? voteCount / totalVotes : 0.0;
+        final isSelected = pollVotes[currentUserId] == index;
+        final isCorrect = isQuiz && index == correctOptionIndex;
+
+        Color borderColor = Colors.grey.shade200;
+        Color fillColor = Colors.white;
+        Color textColor = Colors.black;
+
+        if (hasVoted) {
+          if (isQuiz) {
+            if (isCorrect) {
+              borderColor = Colors.green;
+              fillColor = Colors.green.withValues(alpha: 0.1);
+              textColor = Colors.green;
+            } else if (isSelected) {
+              borderColor = Colors.red;
+              fillColor = Colors.red.withValues(alpha: 0.1);
+              textColor = Colors.red;
+            }
+          } else {
+            // Poll
+            if (isSelected) {
+              borderColor = AppTheme.primary;
+              textColor = AppTheme.primary;
+            }
+          }
+        }
+
+        return GestureDetector(
+          onTap: hasVoted ? null : () => onVote?.call(index),
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: borderColor),
+              color: fillColor,
+            ),
+            child: Stack(
+              children: [
+                if (hasVoted) // Show progress bar for both Polls AND Quizzes
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(7),
+                    child: LinearProgressIndicator(
+                      value: percentage,
+                      backgroundColor: Colors.transparent,
+                      color: isQuiz 
+                        ? (isCorrect ? Colors.green.withValues(alpha: 0.2) : Colors.grey.withValues(alpha: 0.1))
+                        : AppTheme.primary.withValues(alpha: 0.1),
+                      minHeight: 48,
+                    ),
+                  ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 12.0),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          option, 
+                          style: TextStyle(
+                            color: textColor, 
+                            fontWeight: hasVoted && isSelected ? FontWeight.bold : FontWeight.normal
+                          ),
+                        ),
+                      ),
+                      if (hasVoted) ...[
+                        Text(
+                          "${(percentage * 100).toStringAsFixed(1)}%", 
+                          style: TextStyle(color: textColor, fontWeight: FontWeight.bold)
+                        ),
+                        const SizedBox(width: 8),
+                        if (isQuiz && isCorrect)
+                          const Icon(Icons.check_circle, color: Colors.green, size: 20),
+                        if (isQuiz && isSelected && !isCorrect)
+                          const Icon(Icons.cancel, color: Colors.red, size: 20),
+                      ]
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }),
     );
   }
 }

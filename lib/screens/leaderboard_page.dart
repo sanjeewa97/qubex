@@ -8,6 +8,7 @@ class LeaderboardPage extends StatelessWidget {
   const LeaderboardPage({super.key});
 
   @override
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
@@ -18,33 +19,75 @@ class LeaderboardPage extends StatelessWidget {
         elevation: 0,
         foregroundColor: Colors.black,
       ),
-      body: StreamBuilder<List<UserModel>>(
-        stream: FirebaseService().getTopUsers(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: LoadingWidget());
-          }
-
-          if (snapshot.hasError) {
-            return Center(child: Text("Error: ${snapshot.error}"));
-          }
-
-          final users = snapshot.data ?? [];
-
-          if (users.isEmpty) {
-            return const Center(child: Text("No users found."));
-          }
-
-          return ListView.builder(
+      body: Column(
+        children: [
+          // Benchmark / Info Card
+          Container(
+            margin: const EdgeInsets.all(16),
             padding: const EdgeInsets.all(16),
-            itemCount: users.length,
-            itemBuilder: (context, index) {
-              final user = users[index];
-              final rank = index + 1;
-              return _buildLeaderboardItem(context, user, rank);
-            },
-          );
-        },
+            decoration: BoxDecoration(
+              gradient: LinearGradient(colors: [AppTheme.primary, AppTheme.primary.withValues(alpha: 0.8)]),
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(color: AppTheme.primary.withValues(alpha: 0.3), blurRadius: 10, offset: const Offset(0, 4)),
+              ],
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Text("🧠", style: TextStyle(fontSize: 24)),
+                ),
+                const SizedBox(width: 16),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text("Benchmarks", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                      SizedBox(height: 4),
+                      Text("Average: 100 IQ  •  Einstein: ~160 IQ", style: TextStyle(color: Colors.white70, fontSize: 13)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
+          Expanded(
+            child: StreamBuilder<List<UserModel>>(
+              stream: FirebaseService().getTopUsers(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: LoadingWidget());
+                }
+
+                if (snapshot.hasError) {
+                  return Center(child: Text("Error: ${snapshot.error}"));
+                }
+
+                final users = snapshot.data ?? [];
+
+                if (users.isEmpty) {
+                  return const Center(child: Text("No users found."));
+                }
+
+                return ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  itemCount: users.length,
+                  itemBuilder: (context, index) {
+                    final user = users[index];
+                    final rank = index + 1;
+                    return _buildLeaderboardItem(context, user, rank);
+                  },
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -73,7 +116,7 @@ class LeaderboardPage extends StatelessWidget {
           border: rank <= 3 ? Border.all(color: rankColor!, width: 2) : Border.all(color: Colors.grey.shade200),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 10,
               offset: const Offset(0, 4),
             ),
@@ -87,7 +130,7 @@ class LeaderboardPage extends StatelessWidget {
               height: 40,
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: rankColor?.withOpacity(0.1) ?? Colors.grey.shade100,
+                color: rankColor?.withValues(alpha: 0.1) ?? Colors.grey.shade100,
                 shape: BoxShape.circle,
               ),
               child: Text(
@@ -138,11 +181,11 @@ class LeaderboardPage extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
-                color: AppTheme.primary.withOpacity(0.1),
+                color: AppTheme.primary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(
-                "${user.iqScore} IQ",
+                "${user.iqScore.toStringAsFixed(1)} IQ",
                 style: const TextStyle(
                   color: AppTheme.primary,
                   fontWeight: FontWeight.bold,
