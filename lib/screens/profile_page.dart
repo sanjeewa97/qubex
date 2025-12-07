@@ -12,8 +12,9 @@ import 'chat_screen.dart';
 import '../models/post_model.dart';
 import 'feed_page.dart'; // For FeedCard
 import 'post_details_page.dart';
-import 'onboarding_screen.dart';
+
 import 'stats_tab.dart'; // Import StatsTab
+import 'settings_page.dart';
 
 class ProfilePage extends StatefulWidget {
   final String? userId; // If null, show current user
@@ -54,8 +55,12 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
     return Scaffold(
       backgroundColor: AppTheme.background,
       body: StreamBuilder<UserModel?>(
-        stream: Stream.fromFuture(firebaseService.getUser(targetUserId)),
-        builder: (context, snapshot) {
+        stream: firebaseService.getUserStream(user.uid),
+        builder: (context, currentUserSnap) {
+          final currentUserModel = currentUserSnap.data;
+          return StreamBuilder<UserModel?>(
+            stream: Stream.fromFuture(firebaseService.getUser(targetUserId)),
+            builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: LoadingWidget());
           }
@@ -116,38 +121,92 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
                       ),
                     if (isCurrentUser)
                       IconButton(
-                        onPressed: () async {
-                          final shouldSignOut = await showDialog<bool>(
-                            context: context,
-                            builder: (context) => AlertDialog(
-                              title: const Text("Sign Out"),
-                              content: const Text("Are you sure you want to sign out?"),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                              actions: [
-                                TextButton(
-                                  onPressed: () => Navigator.pop(context, false),
-                                  child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
-                                ),
-                                TextButton(
-                                  onPressed: () => Navigator.pop(context, true),
-                                  child: const Text("Sign Out", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
-                                ),
-                              ],
-                            ),
-                          );
-
-                          if (shouldSignOut == true) {
-                            await authService.signOut();
-                            if (context.mounted) {
-                              Navigator.of(context).pushAndRemoveUntil(
-                                MaterialPageRoute(builder: (context) => const OnboardingScreen()),
-                                (route) => false,
-                              );
-                            }
-                          }
+                        onPressed: () {
+                          Navigator.push(context, MaterialPageRoute(builder: (context) => const SettingsPage()));
                         },
-                        icon: const Icon(Icons.logout_rounded, color: Colors.white),
+                        icon: const Icon(Icons.settings_rounded, color: Colors.white),
                       ),
+                      if (!isCurrentUser)
+                        PopupMenuButton<String>(
+                          icon: const Icon(Icons.more_vert, color: Colors.white),
+                          onSelected: (value) async {
+                            final isBlocked = currentUserModel?.blockedUsers.contains(targetUserId) ?? false;
+                            
+                            if (value == 'report') {
+                              showDialog(
+                                  context: context,
+                                  builder: (context) {
+                                    final controller = TextEditingController();
+                                    return AlertDialog(
+                                      title: const Text("Report User"),
+                                      content: TextField(
+                                        controller: controller,
+                                        decoration: const InputDecoration(hintText: "Reason for reporting..."),
+                                      ),
+                                      actions: [
+                                        TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+                                        TextButton(
+                                          onPressed: () {
+                                            if (controller.text.isEmpty) return;
+                                            firebaseService.reportContent(
+                                              reporterId: user.uid,
+                                              contentId: targetUserId,
+                                              contentType: 'user',
+                                              reason: controller.text,
+                                            );
+                                            Navigator.pop(context);
+                                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Report submitted.")));
+                                          },
+                                          child: const Text("Report", style: TextStyle(color: Colors.red)),
+                                        ),
+                                      ],
+                                    );
+                                  }
+                              );
+                            } else if (value == 'block_toggle') {
+                              if (isBlocked) {
+                                await firebaseService.unblockUser(user.uid, targetUserId);
+                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("User unblocked.")));
+                              } else {
+                                showDialog(
+                                    context: context,
+                                    builder: (context) => AlertDialog(
+                                      title: const Text("Block User?"),
+                                      content: const Text("You won't see their posts anymore."),
+                                      actions: [
+                                        TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+                                        TextButton(
+                                          onPressed: () async {
+                                            await firebaseService.blockUser(user.uid, targetUserId);
+                                            if (context.mounted) {
+                                              Navigator.pop(context); // Close dialog
+                                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("User blocked.")));
+                                              // We stay on page to allow unblock or seeing change
+                                            }
+                                          },
+                                          child: const Text("Block", style: TextStyle(color: Colors.red)),
+                                        ),
+                                      ],
+                                    )
+                                );
+                              }
+                            }
+                          },
+                          itemBuilder: (context) {
+                            final isBlocked = currentUserModel?.blockedUsers.contains(targetUserId) ?? false;
+                            return [
+                              const PopupMenuItem(value: 'report', child: Row(children: [Icon(Icons.flag_outlined, size: 20), SizedBox(width: 8), Text("Report User")])),
+                              PopupMenuItem(
+                                value: 'block_toggle', 
+                                child: Row(children: [
+                                  Icon(isBlocked ? Icons.check_circle : Icons.block, size: 20, color: isBlocked ? Colors.green : Colors.red), 
+                                  SizedBox(width: 8), 
+                                  Text(isBlocked ? "Unblock User" : "Block User", style: TextStyle(color: isBlocked ? Colors.green : Colors.red))
+                                ])
+                              ),
+                            ];
+                          },
+                        ),
                   ],
                   flexibleSpace: FlexibleSpaceBar(
                     background: Container(
@@ -280,6 +339,8 @@ class _ProfilePageState extends State<ProfilePage> with SingleTickerProviderStat
               ],
             ),
           );
+        },
+      );
         },
       ),
     );

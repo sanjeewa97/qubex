@@ -67,6 +67,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
 
       final userModel = UserModel(
         id: user.uid,
+        email: user.email ?? '',
         name: _nameController.text.trim(),
         searchName: _nameController.text.trim().toLowerCase(),
         school: _schoolController.text.trim(),

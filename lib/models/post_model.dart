@@ -16,6 +16,7 @@ class PostModel {
   final DateTime timestamp;
   final bool isAchievement;
   final String? imageUrl; // New field
+  final bool isEdited;
   
   // Poll/Quiz Fields
   final List<String> pollOptions;
@@ -38,6 +39,7 @@ class PostModel {
     required this.timestamp,
     this.isAchievement = false,
     this.imageUrl,
+    this.isEdited = false,
     this.pollOptions = const [],
     this.pollVotes = const {},
     this.correctOptionIndex,
@@ -60,6 +62,7 @@ class PostModel {
       timestamp: (map['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
       isAchievement: map['isAchievement'] ?? false,
       imageUrl: map['imageUrl'],
+      isEdited: map['isEdited'] ?? false,
       pollOptions: List<String>.from(map['pollOptions'] ?? []),
       pollVotes: Map<String, int>.from(map['pollVotes'] ?? {}),
       correctOptionIndex: map['correctOptionIndex'],
@@ -82,6 +85,7 @@ class PostModel {
       'timestamp': Timestamp.fromDate(timestamp),
       'isAchievement': isAchievement,
       'imageUrl': imageUrl,
+      'isEdited': isEdited,
       'pollOptions': pollOptions,
       'pollVotes': pollVotes,
       'correctOptionIndex': correctOptionIndex,

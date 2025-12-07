@@ -10,7 +10,8 @@ import '../services/auth_service.dart';
 import '../widgets/loading_widget.dart';
 
 class CreatePostScreen extends StatefulWidget {
-  const CreatePostScreen({super.key});
+  final PostModel? postToEdit;
+  const CreatePostScreen({super.key, this.postToEdit});
 
   @override
   State<CreatePostScreen> createState() => _CreatePostScreenState();
@@ -27,12 +28,35 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   int? _correctOptionIndex; // For Quiz
   File? _selectedImage;
   final ImagePicker _picker = ImagePicker();
+  
+  // For Edit Mode
+  bool get _isEditing => widget.postToEdit != null;
+  String? _networkImageUrl;
 
   @override
   void initState() {
     super.initState();
-    _addOption(); // Start with 2 options
-    _addOption();
+    if (_isEditing) {
+      final post = widget.postToEdit!;
+      _contentController.text = post.content;
+      _selectedType = post.type;
+      _networkImageUrl = post.imageUrl;
+      
+      // Load options if any
+      if (post.pollOptions.isNotEmpty) {
+        for (var option in post.pollOptions) {
+          _optionControllers.add(TextEditingController(text: option));
+        }
+      } else {
+        // Default options if switching types (though we likely lock type)
+        _addOption();
+        _addOption();
+      }
+      _correctOptionIndex = post.correctOptionIndex;
+    } else {
+       _addOption(); // Start with 2 options
+       _addOption();
+    }
   }
 
   void _addOption() {
@@ -58,13 +82,47 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   Future<void> _pickImage() async {
     final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
     if (image != null) {
-      setState(() => _selectedImage = File(image.path));
+      setState(() {
+        _selectedImage = File(image.path);
+        _networkImageUrl = null; // Override network image if new one picked
+      });
     }
   }
 
-  Future<void> _createPost() async {
+  Future<void> _handlePostSubmission() async {
     if (_contentController.text.trim().isEmpty) return;
 
+    setState(() => _isLoading = true);
+    
+    try {
+      print("DEBUG: _handlePostSubmission start. isEditing: $_isEditing");
+      if (_isEditing) {
+        // Update Logic
+        print("DEBUG: Updating post ${widget.postToEdit!.id} with content: ${_contentController.text}");
+        // For MVP, we only allow updating TEXT content.
+        // If we want to support logic changes (polls/images) it gets complex.
+        // Let's assume we just update Content for now as per plan.
+        await _firebaseService.updatePost(widget.postToEdit!.id, _contentController.text.trim());
+      } else {
+        // Create Logic follows...
+        await _performCreate();
+      }
+
+      if (mounted) {
+        Navigator.pop(context);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error: $e")),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _performCreate() async {
     // Validation for Poll/Quiz
     if (_selectedType == 'Poll' || _selectedType == 'Quiz') {
       if (_optionControllers.any((c) => c.text.trim().isEmpty)) {
@@ -77,9 +135,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       }
     }
 
-    setState(() => _isLoading = true);
-
-    try {
       final user = _authService.currentUser;
       if (user == null) throw "User not logged in";
 
@@ -114,19 +169,6 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       );
 
       await _firebaseService.createPost(post);
-
-      if (mounted) {
-        Navigator.pop(context); // Return to Feed
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error creating post: $e")),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
   }
 
   @override
@@ -140,13 +182,13 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           icon: const Icon(Icons.close, color: Colors.black),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text("Create Post", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+        title: Text(_isEditing ? "Edit Post" : "Create Post", style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
         centerTitle: true,
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 16.0),
             child: TextButton(
-              onPressed: _isLoading ? null : _createPost,
+              onPressed: _isLoading ? null : _handlePostSubmission,
               style: TextButton.styleFrom(
                 backgroundColor: AppTheme.primary,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -154,7 +196,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               ),
               child: _isLoading 
                 ? const LoadingWidget(size: 20, color: Colors.white)
-                : const Text("Post", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                : Text(_isEditing ? "Update" : "Post", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
             ),
           )
         ],
@@ -182,7 +224,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                       style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                     ),
                     Text(
-                      "Public • ${_authService.currentUser?.email != null ? "Grade 13" : ""}", // Placeholder or fetch actual grade
+                      "Public • ${_authService.currentUser?.email != null ? "Grade 13" : ""}", 
                       style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
                     ),
                   ],
@@ -192,7 +234,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
             
             const SizedBox(height: 20),
 
-            // Type Selector (Chips)
+            // Type Selector (Chips) - Disabled if Editing
+            if (!_isEditing)
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
@@ -241,8 +284,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               style: const TextStyle(fontSize: 20),
             ),
             
-            // Image Preview
-            if (_selectedImage != null)
+            // Image Preview (Handle both file and network)
+            if (_selectedImage != null || _networkImageUrl != null)
               Stack(
                 children: [
                   Container(
@@ -251,9 +294,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     width: double.infinity,
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(16),
-                      image: DecorationImage(image: FileImage(_selectedImage!), fit: BoxFit.cover),
+                      image: DecorationImage(
+                        image: _selectedImage != null 
+                          ? FileImage(_selectedImage!) 
+                          : NetworkImage(_networkImageUrl!) as ImageProvider,
+                        fit: BoxFit.cover
+                      ),
                     ),
                   ),
+                  if (!_isEditing) // Don't allow removing image in Edit mode for simplicity
                   Positioned(
                     top: 24,
                     right: 8,
@@ -269,8 +318,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 ],
               ),
               
-            // Add Photo Button
-            if (_selectedImage == null)
+            // Add Photo Button - Disabled in Edit Mode
+            if (_selectedImage == null && _networkImageUrl == null && !_isEditing)
               Padding(
                 padding: const EdgeInsets.only(top: 16.0),
                 child: TextButton.icon(
@@ -285,8 +334,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 ),
               ),
 
-            // Poll / Quiz Options Section
-            if (_selectedType == 'Poll' || _selectedType == 'Quiz') ...[
+            // Poll / Quiz Options Section - Disabled in Edit Mode (Hidden)
+            if (!_isEditing && (_selectedType == 'Poll' || _selectedType == 'Quiz')) ...[
               const SizedBox(height: 20),
               Container(
                 padding: const EdgeInsets.all(16),

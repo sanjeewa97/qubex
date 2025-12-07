@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../theme/app_theme.dart';
@@ -23,6 +24,55 @@ class FeedPage extends StatefulWidget {
 
 class _FeedPageState extends State<FeedPage> {
   final FirebaseService _firebaseService = FirebaseService();
+  final ScrollController _scrollController = ScrollController();
+  
+  StreamSubscription? _postsSubscription;
+  List<PostModel> _posts = [];
+  bool _isLoadingInitial = true;
+  String? _lastGrade;
+  int _postsLimit = 10;
+  bool _isFetchingMore = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _postsSubscription?.cancel();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
+      if (!_isFetchingMore && _postsLimit < 500) {
+        _isFetchingMore = true;
+        _postsLimit += 10;
+        if (_lastGrade != null) {
+          _setupPostsStream(_lastGrade!);
+        }
+      }
+    }
+  }
+
+  void _setupPostsStream(String grade) {
+    _postsSubscription?.cancel();
+    _postsSubscription = _firebaseService.getPosts(grade, limit: _postsLimit).listen((newPosts) {
+      if (mounted) {
+        setState(() {
+          _posts = newPosts;
+          _isLoadingInitial = false;
+          _isFetchingMore = false; // Reset flag when data arrives
+        });
+      }
+    }, onError: (e) {
+      print("Error fetching posts: $e");
+      if (mounted) setState(() => _isFetchingMore = false);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -50,7 +100,7 @@ class _FeedPageState extends State<FeedPage> {
                 color: AppTheme.secondary,
                 borderRadius: BorderRadius.circular(20),
                 boxShadow: [
-                  BoxShadow(color: AppTheme.secondary.withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 4))
+                  BoxShadow(color: AppTheme.secondary.withValues(alpha: 0.3), blurRadius: 8, offset: const Offset(0, 4))
                 ]
               ),
               child: StreamBuilder<UserModel?>(
@@ -70,37 +120,40 @@ class _FeedPageState extends State<FeedPage> {
           )
         ],
       ),
-      body: FutureBuilder<UserModel?>(
-        future: _firebaseService.getUser(AuthService().currentUser?.uid ?? ''),
+      body: StreamBuilder<UserModel?>(
+        stream: _firebaseService.getUserStream(AuthService().currentUser?.uid ?? ''),
         builder: (context, userSnapshot) {
-          if (userSnapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: LoadingWidget());
+          if (userSnapshot.connectionState == ConnectionState.waiting && _isLoadingInitial) {
+             // Only show loading if we really don't have user data AND no posts yet
+             // Actually, we need user data to know the grade.
+             return const Center(child: LoadingWidget());
           }
 
           final user = userSnapshot.data;
           final userGrade = user?.grade ?? '';
+          
+          // Setup stream if grade changed (or first run)
+          if (userGrade != _lastGrade) {
+            _lastGrade = userGrade;
+            _setupPostsStream(userGrade);
+          }
 
-          return StreamBuilder<List<PostModel>>(
-            stream: _firebaseService.getPosts(userGrade),
-            builder: (context, snapshot) {
-              if (snapshot.hasError) {
-                return Center(child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Text("Error: ${snapshot.error}", textAlign: TextAlign.center, style: const TextStyle(color: Colors.red)),
-                ));
-              }
+          if (_isLoadingInitial && _posts.isEmpty) {
+             return const Center(child: LoadingWidget());
+          }
 
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: LoadingWidget());
-              }
+          final displayPosts = _posts.where((p) => !(user?.blockedUsers.contains(p.authorId) ?? false)).toList();
 
-              final posts = snapshot.data ?? [];
-
-              return ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  // Post Input
-                  GestureDetector(
+          return ListView.builder(
+            controller: _scrollController,
+            padding: const EdgeInsets.all(16),
+            itemCount: displayPosts.length + 1, // +1 for Header
+            itemBuilder: (context, index) {
+              if (index == 0) {
+                 // Post Input Header
+                 return Padding(
+                   padding: const EdgeInsets.only(bottom: 20.0),
+                   child: GestureDetector(
                     onTap: () {
                       Navigator.push(context, MaterialPageRoute(builder: (context) => const CreatePostScreen()));
                     },
@@ -110,7 +163,7 @@ class _FeedPageState extends State<FeedPage> {
                         color: Colors.white, 
                         borderRadius: BorderRadius.circular(20),
                         boxShadow: [
-                          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))
+                          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 4))
                         ]
                       ),
                       child: Row(
@@ -128,47 +181,57 @@ class _FeedPageState extends State<FeedPage> {
                       ),
                     ),
                   ).animate().fade().slideY(begin: 0.2, end: 0, duration: 400.ms),
-                  
-                  const SizedBox(height: 20),
-                  
-                  if (posts.isEmpty)
-                    Center(child: Padding(
+                 );
+              }
+
+              if (displayPosts.isEmpty && index == 1) {
+                  return Center(child: Padding(
                       padding: const EdgeInsets.all(20.0),
                       child: Text("No posts for Grade $userGrade yet.", style: Theme.of(context).textTheme.bodyMedium),
-                    )),
+                    ));
+              }
+              
+              if (displayPosts.isEmpty) return const SizedBox.shrink();
 
-                  // Dynamic Posts
-                  ...posts.asMap().entries.map((entry) {
-                    int index = entry.key;
-                    PostModel post = entry.value;
-                    return GestureDetector(
-                      onTap: () {
-                        Navigator.push(context, MaterialPageRoute(builder: (context) => PostDetailsPage(postId: post.id, post: post)));
-                      },
-                      child: FeedCard(
-                        postId: post.id, // Add postId
-                        currentUserId: AuthService().currentUser?.uid ?? '', // Add currentUserId
-                        type: post.type,
-                        authorId: post.authorId,
-                        author: post.authorName,
-                        authorPhotoUrl: post.authorPhotoUrl,
-                        school: post.school,
-                        content: post.content,
-                        likes: post.likes,
-                        comments: post.comments,
-                        isAchievement: post.isAchievement,
-                        imageUrl: post.imageUrl, // Add imageUrl usage
-                        isLiked: post.likedBy.contains(user?.id),
-                        pollOptions: post.pollOptions,
-                        pollVotes: post.pollVotes,
-                        correctOptionIndex: post.correctOptionIndex,
-                        onLike: () => _firebaseService.toggleLike(post.id, post.authorId),
-                        onVote: (optionIndex) => _firebaseService.voteOnPoll(post.id, optionIndex),
-                      ).animate(delay: (100 * index).ms).fade().slideX(begin: 0.1, end: 0),
-                    );
-                  }),
-                ],
+              final post = displayPosts[index - 1];
+              final item = Padding(
+                padding: const EdgeInsets.only(bottom: 16.0),
+                child: GestureDetector(
+                  onTap: () {
+                    Navigator.push(context, MaterialPageRoute(builder: (context) => PostDetailsPage(postId: post.id, post: post)));
+                  },
+                  child: FeedCard(
+                    postId: post.id, 
+                    currentUserId: AuthService().currentUser?.uid ?? '',
+                    type: post.type,
+                    authorId: post.authorId,
+                    author: post.authorName,
+                    authorPhotoUrl: post.authorPhotoUrl,
+                    school: post.school,
+                    content: post.content,
+                    likes: post.likes,
+                    comments: post.comments,
+                    isAchievement: post.isAchievement,
+                    imageUrl: post.imageUrl, 
+                    isEdited: post.isEdited,
+                    isLiked: post.likedBy.contains(user?.id),
+                    pollOptions: post.pollOptions,
+                    pollVotes: post.pollVotes,
+                    correctOptionIndex: post.correctOptionIndex,
+                    onLike: () => _firebaseService.toggleLike(post.id, post.authorId),
+                    onVote: (optionIndex) => _firebaseService.voteOnPoll(post.id, optionIndex),
+                    postModel: post,
+                  ),
+                ),
               );
+
+              // Only animate the first few items for initial load "wow" factor.
+              // Scroll items should be instant for performance.
+              // Index 0 is header, so posts start at index 1.
+              if (index <= 5) {
+                  return item.animate(delay: ((index - 1) * 100).ms).fade(duration: 400.ms).slideX(begin: 0.1, end: 0, curve: Curves.easeOut);
+              }
+              return item;
             },
           );
         },
@@ -196,13 +259,15 @@ class FeedCard extends StatelessWidget {
   final int likes;
   final int comments;
   final bool isAchievement;
-  final String? imageUrl; // Add field
+  final String? imageUrl; 
+  final bool isEdited; // Add field
   final bool isLiked;
   final VoidCallback? onLike;
   final List<String> pollOptions;
   final Map<String, int> pollVotes;
   final int? correctOptionIndex;
   final Function(int)? onVote;
+  final PostModel? postModel; // Add field for passing to edit screen
 
   const FeedCard({
     super.key,
@@ -217,13 +282,15 @@ class FeedCard extends StatelessWidget {
     required this.likes,
     required this.comments,
     this.isAchievement = false,
-    this.imageUrl, // Add imageUrl to constructor
+    this.imageUrl, 
+    this.isEdited = false,
     this.isLiked = false,
     this.onLike,
     this.pollOptions = const [],
     this.pollVotes = const {},
     this.correctOptionIndex,
     this.onVote,
+    this.postModel,
   });
 
   @override
@@ -234,10 +301,7 @@ class FeedCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        border: isAchievement ? Border.all(color: AppTheme.accent.withValues(alpha: 0.5), width: 2) : null,
-        boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 8, offset: const Offset(0, 2))
-        ]
+        border: isAchievement ? Border.all(color: AppTheme.accent.withValues(alpha: 0.5), width: 2) : Border.all(color: Colors.grey.shade100), // Light border instead of shadow
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -274,13 +338,97 @@ class FeedCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(type, style: TextStyle(color: isAchievement ? AppTheme.accent.withValues(alpha: 1) : AppTheme.primary, fontSize: 12, fontWeight: FontWeight.bold)),
-                )
+                ),
+                PopupMenuButton<String>(
+                  padding: EdgeInsets.zero,
+                  icon: Icon(Icons.more_vert, color: Colors.grey.shade400),
+                  onSelected: (value) async {
+                    if (value == 'edit') {
+                      if (postModel != null) {
+                         Navigator.push(context, MaterialPageRoute(builder: (context) => CreatePostScreen(postToEdit: postModel)));
+                      }
+                    } else if (value == 'report') {
+                      showDialog(
+                        context: context,
+                        builder: (context) {
+                          final controller = TextEditingController();
+                          return AlertDialog(
+                            title: const Text("Report Post"),
+                            content: TextField(
+                              controller: controller,
+                              decoration: const InputDecoration(hintText: "Reason for reporting..."),
+                            ),
+                            actions: [
+                              TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+                              TextButton(
+                                onPressed: () {
+                                  if (controller.text.isEmpty) return;
+                                  FirebaseService().reportContent(
+                                    reporterId: currentUserId,
+                                    contentId: postId,
+                                    contentType: 'post',
+                                    reason: controller.text,
+                                  );
+                                  Navigator.pop(context);
+                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Report submitted.")));
+                                },
+                                child: const Text("Report", style: TextStyle(color: Colors.red)),
+                              ),
+                            ],
+                          );
+                        }
+                      );
+                    } else if (value == 'block') {
+                      showDialog(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          title: Text("Block $author?"),
+                          content: const Text("You won't see their posts anymore."),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+                            TextButton(
+                              onPressed: () async {
+                                await FirebaseService().blockUser(currentUserId, authorId);
+                                Navigator.pop(context);
+                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("User blocked.")));
+                              },
+                              child: const Text("Block", style: TextStyle(color: Colors.red)),
+                            ),
+                          ],
+                        )
+                      );
+                    }
+                  },
+                  itemBuilder: (context) {
+                    return [
+                      if (currentUserId == authorId)
+                        const PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit, size: 20), SizedBox(width: 8), Text("Edit Post")])),
+
+                      const PopupMenuItem(value: 'report', child: Row(children: [Icon(Icons.flag_outlined, size: 20), SizedBox(width: 8), Text("Report Post")])),
+                      
+                      if (currentUserId != authorId)
+                        const PopupMenuItem(value: 'block', child: Row(children: [Icon(Icons.block, size: 20, color: Colors.red), SizedBox(width: 8), Text("Block User", style: TextStyle(color: Colors.red))])),
+                    ];
+                  },
+                ),
               ],
             ),
           ),
           
           const SizedBox(height: 12),
-          Text(content, style: Theme.of(context).textTheme.bodyLarge),
+          const SizedBox(height: 12),
+          Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(text: content, style: Theme.of(context).textTheme.bodyLarge),
+                if (isEdited)
+                  TextSpan(
+                    text: " (edited)",
+                    style: TextStyle(color: Colors.grey.shade400, fontSize: 12, fontStyle: FontStyle.italic),
+                  ),
+              ],
+            ),
+          ),
           if (imageUrl != null && imageUrl!.isNotEmpty) ...[
              const SizedBox(height: 12),
              ClipRRect(

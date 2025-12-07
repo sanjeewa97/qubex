@@ -18,7 +18,7 @@ class FirebaseService {
   // --- POSTS ---
   
   // Fetch posts as a stream for real-time updates
-  Stream<List<PostModel>> getPosts(String currentUserGrade) {
+  Stream<List<PostModel>> getPosts(String currentUserGrade, {int? limit}) {
     if (Firebase.apps.isEmpty) {
       print("Firebase not initialized. Returning empty stream.");
       return Stream.value([]);
@@ -32,6 +32,10 @@ class FirebaseService {
         query = query.where('grade', isEqualTo: 'University');
       } else {
         query = query.where('grade', isEqualTo: currentUserGrade);
+      }
+
+      if (limit != null) {
+        query = query.limit(limit);
       }
 
       return query.snapshots().map((snapshot) {
@@ -781,4 +785,75 @@ class FirebaseService {
       print("Error marking chat as read: $e");
     }
   }
+
+  // --- MODERATION ---
+
+  Future<void> reportContent({required String contentId, required String contentType, required String reason, required String reporterId}) async {
+    try {
+      await _firestore.collection('reports').add({
+        'reporterId': reporterId,
+        'contentId': contentId,
+        'contentType': contentType,
+        'reason': reason,
+        'timestamp': FieldValue.serverTimestamp(),
+        'status': 'pending',
+      });
+    } catch (e) {
+      print("Error reporting content: $e");
+      throw e;
+    }
+  }
+
+  Future<void> blockUser(String currentUserId, String blockedUserId) async {
+    try {
+      await _firestore.collection('users').doc(currentUserId).update({
+        'blockedUsers': FieldValue.arrayUnion([blockedUserId])
+      });
+    } catch (e) {
+      print("Error blocking user: $e");
+      throw e;
+    }
+  }
+
+  Future<void> unblockUser(String currentUserId, String blockedUserId) async {
+    try {
+      await _firestore.collection('users').doc(currentUserId).update({
+        'blockedUsers': FieldValue.arrayRemove([blockedUserId])
+      });
+    } catch (e) {
+      print("Error unblocking user: $e");
+      throw e;
+    }
+  }
+
+  // --- ADMIN PANEL ---
+
+  Stream<QuerySnapshot> getReports() {
+    return _firestore
+        .collection('reports')
+        .where('status', isEqualTo: 'pending')
+        .orderBy('timestamp', descending: true)
+        .snapshots();
+  }
+
+  Future<void> resolveReport(String reportId) async {
+    await _firestore.collection('reports').doc(reportId).update({'status': 'resolved'});
+  }
+
+  Future<void> banUserSystem(String userId) async {
+    await _firestore.collection('users').doc(userId).update({'isBanned': true});
+  }
+
+  Future<void> deletePost(String postId) async {
+    await _firestore.collection('posts').doc(postId).delete();
+  }
+
+  Future<void> updatePost(String postId, String newContent) async {
+    await _firestore.collection('posts').doc(postId).update({
+      'content': newContent,
+      'isEdited': true,
+    });
+  }
+
+
 }

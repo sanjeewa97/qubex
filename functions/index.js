@@ -1,27 +1,21 @@
-const { onDocumentCreated } = require("firebase-functions/v2/firestore");
-const { initializeApp } = require("firebase-admin/app");
-const { getFirestore } = require("firebase-admin/firestore");
-const { getMessaging } = require("firebase-admin/messaging");
+const functions = require("firebase-functions");
+const admin = require("firebase-admin");
+admin.initializeApp();
 
-initializeApp();
-
-exports.sendChatNotification = onDocumentCreated(
-  "chats/{chatId}/messages/{messageId}",
-  async (event) => {
-    const message = event.data.data();
-    const chatId = event.params.chatId;
-
-    const db = getFirestore();
-    const messaging = getMessaging();
+exports.sendChatNotification = functions.firestore
+  .document("chats/{chatId}/messages/{messageId}")
+  .onCreate(async (snap, context) => {
+    const message = snap.data();
+    const chatId = context.params.chatId;
 
     // Get chat details to find participants
-    const chatDoc = await db.collection("chats").doc(chatId).get();
+    const chatDoc = await admin.firestore().collection("chats").doc(chatId).get();
     const chatData = chatDoc.data();
     const participants = chatData.participants;
     const senderId = message.senderId;
 
     // Get sender details
-    const senderDoc = await db.collection("users").doc(senderId).get();
+    const senderDoc = await admin.firestore().collection("users").doc(senderId).get();
     const senderName = senderDoc.data().name;
 
     // Filter out sender from recipients
@@ -30,7 +24,7 @@ exports.sendChatNotification = onDocumentCreated(
     // Get tokens for recipients
     const tokens = [];
     for (const recipientId of recipientIds) {
-      const userDoc = await db.collection("users").doc(recipientId).get();
+      const userDoc = await admin.firestore().collection("users").doc(recipientId).get();
       const userData = userDoc.data();
       if (userData && userData.fcmToken) {
         tokens.push(userData.fcmToken);
@@ -42,23 +36,20 @@ exports.sendChatNotification = onDocumentCreated(
       return;
     }
 
-    // Send to each device
-    const notificationPromises = tokens.map((token) => {
-      const payload = {
-        token: token,
-        notification: {
-          title: chatData.isGroup ? chatData.groupName : senderName,
-          body: message.content || (message.attachmentUrl ? "Sent an attachment" : "New message"),
-        },
-        data: {
-          chatId: chatId,
-          type: "chat",
-        },
-      };
-      return messaging.send(payload);
-    });
+    // Construct payload
+    const payload = {
+      notification: {
+        title: chatData.isGroup ? chatData.groupName : senderName,
+        body: message.content || (message.attachmentUrl ? "Sent an attachment" : "New message"),
+        clickAction: "FLUTTER_NOTIFICATION_CLICK",
+      },
+      data: {
+        chatId: chatId,
+        type: "chat",
+      },
+    };
 
-    await Promise.all(notificationPromises);
+    // Send to devices
+    await admin.messaging().sendToDevice(tokens, payload);
     console.log("Notification sent to", tokens.length, "devices.");
-  }
-);
+  });

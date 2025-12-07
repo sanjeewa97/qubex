@@ -191,6 +191,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
       final updatedUser = UserModel(
         id: authUser.uid,
+        email: authUser.email ?? '',
         name: _nameController.text.trim(),
         searchName: _nameController.text.trim().toLowerCase(),
         school: _schoolController.text.trim(),
